@@ -1,0 +1,26 @@
+# Python temporary files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Python virtual environment
+.venv/
+venv/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Local databases
+*.db
+*.sqlite3
+
+# IDE and operating system files
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Test coverage
+.coverage
+htmlcov/
