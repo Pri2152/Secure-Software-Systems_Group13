@@ -9,13 +9,13 @@ from datetime import timedelta
 from cachelib import SimpleCache
 from flask import Flask, jsonify, session
 from flask_session import Session
-from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import CSRFProtect, generate_csrf
 
 
 # Create Flask application
 app = Flask(__name__)
 
-# SR-16: Maximum inactivity period
+# SR-16: Maximum inactivity period (10 minutes)
 INACTIVITY_LIMIT_SECONDS = 600
 
 # Security configuration
@@ -28,20 +28,20 @@ app.config.update(
     SESSION_CACHELIB=SimpleCache(),
     SESSION_PERMANENT=True,
 
-    # Session cookie security
+    # Secure session cookies
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=True,
     SESSION_REFRESH_EACH_REQUEST=True,
 
-    # Session lifetime: 10 minutes
+    # Session lifetime
     PERMANENT_SESSION_LIFETIME=timedelta(minutes=10),
 
     # Enable CSRF protection
     WTF_CSRF_ENABLED=True,
 )
 
-# Initialise Flask-Session
+# Initialise server-side session management
 Session(app)
 
 # Initialise CSRF protection
@@ -68,7 +68,7 @@ def require_active_session(view_function):
         now = current_timestamp()
         last_activity = session.get("last_activity")
 
-        # Reject missing or invalid activity timestamps
+        # Validate the activity timestamp
         valid_timestamp = (
             isinstance(last_activity, (int, float))
             and not isinstance(last_activity, bool)
@@ -82,7 +82,7 @@ def require_active_session(view_function):
                 "error": "Session expired"
             }), 401
 
-        # Check the 10-minute inactivity timeout
+        # Check 10-minute inactivity timeout
         inactive_seconds = now - last_activity
 
         if inactive_seconds >= INACTIVITY_LIMIT_SECONDS:
@@ -91,7 +91,7 @@ def require_active_session(view_function):
                 "error": "Session expired due to inactivity"
             }), 401
 
-        # Refresh activity timestamp
+        # Update session activity time
         session["last_activity"] = now
         session.permanent = True
 
@@ -110,9 +110,24 @@ def home():
 @app.get("/session-status")
 @require_active_session
 def session_status():
+
     return jsonify({
         "message": "Session active",
-        "authenticated": True
+        "authenticated": True,
+        "csrf_token": generate_csrf()
+    }), 200
+
+
+# SR-16: Secure logout
+@app.post("/logout")
+@require_active_session
+def logout():
+
+    # Invalidate authenticated session
+    session.clear()
+
+    return jsonify({
+        "message": "Logged out successfully"
     }), 200
 
 
@@ -122,6 +137,6 @@ def test_action():
     return "Test action completed"
 
 
-# Start local development server
+# Run application locally
 if __name__ == "__main__":
     app.run(debug=False)

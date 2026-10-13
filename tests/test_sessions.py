@@ -30,6 +30,14 @@ def create_test_session(client, last_activity):
         test_session.permanent = True
 
 
+def csrf_headers(token):
+    """Create headers for a CSRF-protected request."""
+    return {
+        "X-CSRFToken": token,
+        "Referer": HTTPS_URL + "/session-status"
+    }
+
+
 # Test 1: Secure cookie configuration
 def test_secure_cookie_configuration():
     assert application.app.config[
@@ -71,7 +79,7 @@ def test_server_side_session_backend():
     assert backend == "CacheLibSessionInterface"
 
 
-# Test 5: Unauthenticated requests
+# Test 5: Unauthenticated access
 def test_unauthenticated_access_denied(client):
     response = client.get(
         "/session-status",
@@ -81,7 +89,7 @@ def test_unauthenticated_access_denied(client):
     assert response.status_code == 401
 
 
-# Test 6: Active session refreshes its timestamp
+# Test 6: Active session refresh
 def test_active_session_refresh(client, monkeypatch):
     clock = [1000.0]
 
@@ -100,7 +108,6 @@ def test_active_session_refresh(client, monkeypatch):
 
     assert first_response.status_code == 200
 
-    # 599 seconds after the first request
     clock[0] = 1599.0
 
     second_response = client.get(
@@ -121,7 +128,6 @@ def test_session_expires_after_inactivity(
         lambda: 1000.0
     )
 
-    # Last activity was 601 seconds ago
     create_test_session(client, last_activity=399.0)
 
     response = client.get(
@@ -138,7 +144,7 @@ def test_session_expires_after_inactivity(
         assert test_session.get("authenticated") is not True
 
 
-# Test 8: Exactly 10 minutes is expired
+# Test 8: Exactly 10 minutes
 def test_session_expires_at_ten_minutes(
     client, monkeypatch
 ):
@@ -182,3 +188,110 @@ def test_session_cookie_attributes(client, monkeypatch):
     assert "Secure" in cookie_header
     assert "HttpOnly" in cookie_header
     assert "SameSite=Lax" in cookie_header
+
+
+# Test 10: Valid CSRF token accepted
+def test_valid_csrf_token(client):
+    create_test_session(
+        client,
+        last_activity=application.current_timestamp()
+    )
+
+    status_response = client.get(
+        "/session-status",
+        base_url=HTTPS_URL
+    )
+
+    assert status_response.status_code == 200
+
+    token = status_response.get_json()["csrf_token"]
+
+    response = client.post(
+        "/test-action",
+        base_url=HTTPS_URL,
+        headers=csrf_headers(token)
+    )
+
+    assert response.status_code == 200
+
+
+# Test 11: Secure logout
+def test_secure_logout(client):
+    create_test_session(
+        client,
+        last_activity=application.current_timestamp()
+    )
+
+    status_response = client.get(
+        "/session-status",
+        base_url=HTTPS_URL
+    )
+
+    assert status_response.status_code == 200
+
+    token = status_response.get_json()["csrf_token"]
+
+    logout_response = client.post(
+        "/logout",
+        base_url=HTTPS_URL,
+        headers=csrf_headers(token)
+    )
+
+    assert logout_response.status_code == 200
+
+    # Authenticated access must no longer work
+    response = client.get(
+        "/session-status",
+        base_url=HTTPS_URL
+    )
+
+    assert response.status_code == 401
+
+
+# Test 12: Logout without CSRF token rejected
+def test_logout_without_csrf_token(client):
+    create_test_session(
+        client,
+        last_activity=application.current_timestamp()
+    )
+
+    response = client.post(
+        "/logout",
+        base_url=HTTPS_URL
+    )
+
+    assert response.status_code == 400
+
+
+# Test 13: Old CSRF token invalid after logout
+def test_old_csrf_token_invalid_after_logout(client):
+    create_test_session(
+        client,
+        last_activity=application.current_timestamp()
+    )
+
+    status_response = client.get(
+        "/session-status",
+        base_url=HTTPS_URL
+    )
+
+    assert status_response.status_code == 200
+
+    token = status_response.get_json()["csrf_token"]
+
+    logout_response = client.post(
+        "/logout",
+        base_url=HTTPS_URL,
+        headers=csrf_headers(token)
+    )
+
+    assert logout_response.status_code == 200
+
+    # Reusing the previous CSRF token must fail
+    response = client.post(
+        "/test-action",
+        base_url=HTTPS_URL,
+        headers=csrf_headers(token)
+    )
+
+    assert response.status_code == 400
