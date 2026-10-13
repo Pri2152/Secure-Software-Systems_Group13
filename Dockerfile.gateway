@@ -1,0 +1,19 @@
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+COPY requirements.txt ./
+
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
+
+COPY *.py ./
+
+RUN useradd --create-home --uid 10001 evpuser
+
+USER evpuser
+
+CMD ["gunicorn", "--workers", "1", "--bind", "127.0.0.1:5000", "gateway_runtime:application"]

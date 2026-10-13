@@ -4,26 +4,29 @@ Electronic Voting Platform - Workstream A.
 
 SR-01: Password authentication, MFA and rate limiting
 SR-05: Object-level authorisation
+SR-07: Diplomatic-mission access restrictions
 SR-16: Secure sessions, CSRF and logout
 
 Local academic prototype. Not production-ready.
 """
 
+import ipaddress
+import math
 import os
 import secrets
 import time
-import math
 
-from functools import wraps
 from datetime import timedelta
+from functools import wraps
 
 from cachelib import SimpleCache
-from flask import Flask, jsonify, request, session
+from flask import Flask, g, jsonify, request, session
 from flask_session import Session
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 
-from records import db
+from gateway_security import evaluate_gateway_request
 from record_routes import create_record_blueprint
+from records import db
 
 
 app = Flask(__name__)
@@ -50,7 +53,11 @@ app.config.update(
 
     LOGIN_COORDINATOR=None,
 
-    # Isolated, non-persistent prototype database.
+    SR07_GATEWAY_ENFORCED=(
+        os.environ.get("SR07_GATEWAY_ENFORCED") == "1"
+    ),
+    MISSION_ACCESS_POLICY=None,
+
     SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
 )
@@ -58,8 +65,65 @@ app.config.update(
 Session(app)
 csrf = CSRFProtect(app)
 
-# SR-05: Initialise database support.
 db.init_app(app)
+
+
+@app.before_request
+def enforce_mission_access():
+
+    if app.config.get("SR07_GATEWAY_ENFORCED") is not True:
+        return None
+
+    policy = app.config.get("MISSION_ACCESS_POLICY")
+
+    if policy is None:
+        app.logger.error(
+            "SR-07 gateway policy is not configured"
+        )
+        return jsonify({
+            "error": "Access policy unavailable"
+        }), 503
+
+    try:
+        decision = evaluate_gateway_request(
+            request,
+            policy
+        )
+    except Exception:
+        app.logger.exception(
+            "SR-07 gateway evaluation failed"
+        )
+        return jsonify({
+            "error": "Access policy unavailable"
+        }), 503
+
+    if not decision.allowed:
+        return jsonify({
+            "error": "Access denied"
+        }), 403
+
+    # The gateway adapter checks the peer and
+    # mission policy before this point.
+    # Nginx must overwrite X-EVP-Source-IP.
+    try:
+        trusted_source_ip = str(
+            ipaddress.ip_address(
+                request.headers.get(
+                    "X-EVP-Source-IP", ""
+                ).strip()
+            )
+        )
+    except (ValueError, AttributeError):
+        return jsonify({
+            "error": "Access denied"
+        }), 403
+
+    # Retain the validated original source for
+    # SR-01 rate limiting and audit purposes.
+    g.sr07_source_ip = trusted_source_ip
+    g.mission_access_reason = decision.reason
+
+    return None
 
 
 def current_timestamp():
@@ -190,9 +254,13 @@ def login():
             "error": "Invalid request"
         }), 400
 
-    # Obtain source address from the server's
-    # connection metadata, not client JSON.
-    source_id = request.remote_addr
+    # In gateway mode, use the original source IP
+    # validated during the SR-07 access check.
+    # Otherwise preserve standalone test behaviour.
+    if app.config.get("SR07_GATEWAY_ENFORCED") is True:
+        source_id = g.get("sr07_source_ip")
+    else:
+        source_id = request.remote_addr
 
     if not source_id:
         return jsonify({
@@ -247,13 +315,11 @@ def logout():
     }), 200
 
 
-# Temporary endpoint for existing CSRF tests.
 @app.post("/test-action")
 def test_action():
     return "Test action completed"
 
 
-# SR-05: Register protected record endpoints.
 app.register_blueprint(
     create_record_blueprint(
         require_active_session
