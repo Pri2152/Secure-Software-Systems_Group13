@@ -2,14 +2,15 @@
 """
 SR-01: Integrated voter authentication prototype.
 
-Combines:
+Security controls:
 - Argon2id password verification
-- TOTP MFA verification
+- TOTP multi-factor authentication
 - Account and source rate limiting
 - TOTP replay prevention
-- Successful authentication callback
+- Input validation
+- Secure session integration
 
-Uses synthetic voter records during testing.
+This is a local prototype using synthetic voter data.
 """
 
 import logging
@@ -42,10 +43,37 @@ class AuthenticationResult:
     status: str
 
 
+def normalize_account_id(account_id):
+    """Validate and normalise account identifiers."""
+
+    if not isinstance(account_id, str):
+        return None
+
+    account_id = account_id.strip().casefold()
+
+    if not account_id:
+        return None
+
+    return account_id
+
+
+def normalize_source_id(source_id):
+    """Validate the trusted source identifier."""
+
+    if not isinstance(source_id, str):
+        return None
+
+    source_id = source_id.strip()
+
+    if not source_id:
+        return None
+
+    return source_id
+
+
 class TOTPReplayGuard:
     """
-    Prevent acceptance of more than one TOTP code
-    per voter during the same or an earlier time step.
+    Prevent reuse of an accepted TOTP time step.
 
     In-memory prototype only.
     """
@@ -76,14 +104,14 @@ class TOTPReplayGuard:
                 return False
 
             self.last_used_step[voter_id] = current_step
+
             return True
 
 
 class LoginCoordinator:
     """
-    Coordinates password and MFA authentication.
-
-    Does not create a public login endpoint.
+    Coordinates password verification, MFA,
+    rate limiting and authenticated sessions.
     """
 
     def __init__(
@@ -93,21 +121,28 @@ class LoginCoordinator:
         clock=None,
         replay_guard=None,
     ):
+        if not callable(lookup_voter):
+            raise TypeError(
+                "A voter lookup function is required"
+            )
+
         self.lookup_voter = lookup_voter
+
         self.rate_limiter = (
             rate_limiter
             if rate_limiter is not None
             else LoginRateLimiter()
         )
+
         self.clock = clock or time.time
+
         self.replay_guard = (
             replay_guard
             if replay_guard is not None
             else TOTPReplayGuard()
         )
 
-        # Dummy hash to reduce timing differences
-        # when an account does not exist.
+        # Dummy hash for unknown accounts
         self.dummy_hash = hash_password(
             secrets.token_urlsafe(32)
         )
@@ -123,11 +158,11 @@ class LoginCoordinator:
         """
         Authenticate using password and TOTP.
 
-        on_authenticated must be a trusted server-side
-        callback that creates the authenticated session.
+        Authentication succeeds only when both
+        factors pass all security checks.
 
-        source_id must be obtained from a trusted
-        server-side source, not user-controlled input.
+        source_id must be obtained from trusted
+        server-side request metadata.
         """
 
         if not callable(on_authenticated):
@@ -135,27 +170,50 @@ class LoginCoordinator:
                 "An authentication callback is required"
             )
 
-        account_key = account_id.strip().casefold()
+        # Validate account identifier
+        account_key = normalize_account_id(account_id)
 
-        # Check account and source limits first
+        if account_key is None:
+            logger.info("authentication_rejected")
+
+            return AuthenticationResult(
+                False, "invalid_credentials"
+            )
+
+        # Validate source identifier
+        source_key = normalize_source_id(source_id)
+
+        if source_key is None:
+            logger.warning(
+                "authentication_invalid_source"
+            )
+
+            return AuthenticationResult(
+                False, "invalid_request"
+            )
+
+        # Check account and source limits
         if self.rate_limiter.is_blocked(
-            account_key, source_id
+            account_key, source_key
         ):
-            logger.warning("authentication_rate_limited")
+            logger.warning(
+                "authentication_rate_limited"
+            )
 
             return AuthenticationResult(
                 False, "rate_limited"
             )
 
+        # Retrieve voter from trusted storage
         voter = self.lookup_voter(account_key)
 
-        # Use a dummy hash for unknown accounts
         stored_hash = (
             voter.password_hash
             if isinstance(voter, VoterRecord)
             else self.dummy_hash
         )
 
+        # Verify first factor
         password_valid = verify_password(
             stored_hash, password
         )
@@ -165,15 +223,16 @@ class LoginCoordinator:
             or not password_valid
         ):
             self.rate_limiter.record_failure(
-                account_key, source_id
+                account_key, source_key
             )
+
             logger.info("authentication_rejected")
 
             return AuthenticationResult(
                 False, "invalid_credentials"
             )
 
-        # Verify and consume the one-time MFA code
+        # Verify and consume second factor
         mfa_valid = self.replay_guard.verify_and_consume(
             voter.voter_id,
             voter.totp_secret,
@@ -183,16 +242,16 @@ class LoginCoordinator:
 
         if not mfa_valid:
             self.rate_limiter.record_failure(
-                account_key, source_id
+                account_key, source_key
             )
+
             logger.info("authentication_rejected")
 
             return AuthenticationResult(
                 False, "invalid_credentials"
             )
 
-        # Both factors have passed.
-        # Only now establish the authenticated session.
+        # Both factors verified
         on_authenticated(voter.voter_id)
 
         logger.info("authentication_success")
