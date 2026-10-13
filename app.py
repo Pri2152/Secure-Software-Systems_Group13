@@ -1,8 +1,19 @@
 
+"""
+Electronic Voting Platform - Workstream A.
+
+SR-01: Password authentication, MFA and rate limiting
+SR-05: Object-level authorisation
+SR-16: Secure sessions, CSRF and logout
+
+Local academic prototype. Not production-ready.
+"""
+
 import os
 import secrets
 import time
 import math
+
 from functools import wraps
 from datetime import timedelta
 
@@ -10,6 +21,9 @@ from cachelib import SimpleCache
 from flask import Flask, jsonify, request, session
 from flask_session import Session
 from flask_wtf.csrf import CSRFProtect, generate_csrf
+
+from records import db
+from record_routes import create_record_blueprint
 
 
 app = Flask(__name__)
@@ -32,16 +46,20 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(minutes=10),
 
     WTF_CSRF_ENABLED=True,
-
     MAX_CONTENT_LENGTH=4096,
 
-    # Supplied by a trusted application setup.
-    # Synthetic voters are configured in tests only.
     LOGIN_COORDINATOR=None,
+
+    # Isolated, non-persistent prototype database.
+    SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+    SQLALCHEMY_TRACK_MODIFICATIONS=False,
 )
 
 Session(app)
 csrf = CSRFProtect(app)
+
+# SR-05: Initialise database support.
+db.init_app(app)
 
 
 def current_timestamp():
@@ -56,7 +74,9 @@ def establish_authenticated_session(
         not isinstance(verified_voter_id, str)
         or not verified_voter_id.strip()
     ):
-        raise ValueError("A verified voter ID is required")
+        raise ValueError(
+            "A verified voter ID is required"
+        )
 
     active_session = (
         session if session_obj is None else session_obj
@@ -116,7 +136,6 @@ def home():
     return "Electronic Voting Platform - Workstream A"
 
 
-# Issue a CSRF token for the unauthenticated login form.
 @app.get("/login/csrf")
 def login_csrf():
     return jsonify({
@@ -124,7 +143,6 @@ def login_csrf():
     }), 200
 
 
-# SR-01: HTTP authentication endpoint
 @app.post("/login")
 def login():
 
@@ -133,7 +151,9 @@ def login():
             "error": "Already authenticated"
         }), 409
 
-    coordinator = app.config.get("LOGIN_COORDINATOR")
+    coordinator = app.config.get(
+        "LOGIN_COORDINATOR"
+    )
 
     if coordinator is None:
         return jsonify({
@@ -156,7 +176,6 @@ def login():
     password = data.get("password")
     totp_code = data.get("totp_code")
 
-    # Validate types and limit processing costs.
     if (
         not isinstance(account_id, str)
         or not 1 <= len(account_id.strip()) <= 128
@@ -171,8 +190,8 @@ def login():
             "error": "Invalid request"
         }), 400
 
-    # Use the connection source, not user-submitted
-    # X-Forwarded-For headers.
+    # Obtain source address from the server's
+    # connection metadata, not client JSON.
     source_id = request.remote_addr
 
     if not source_id:
@@ -203,7 +222,6 @@ def login():
             "error": "Invalid request"
         }), 400
 
-    # Do not reveal which factor was incorrect.
     return jsonify({
         "error": "Invalid authentication credentials"
     }), 401
@@ -229,10 +247,18 @@ def logout():
     }), 200
 
 
-# Temporary endpoint used by existing CSRF tests.
+# Temporary endpoint for existing CSRF tests.
 @app.post("/test-action")
 def test_action():
     return "Test action completed"
+
+
+# SR-05: Register protected record endpoints.
+app.register_blueprint(
+    create_record_blueprint(
+        require_active_session
+    )
+)
 
 
 if __name__ == "__main__":
