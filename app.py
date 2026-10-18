@@ -197,6 +197,7 @@ def require_active_session(view_function):
 
         return view_function(*args, **kwargs)
 
+    wrapper.requires_active_session = True
     return wrapper
 
 
