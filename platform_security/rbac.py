@@ -79,14 +79,18 @@ def has_permission(role, permission):
     )
 
 
-def _login_type():
+def _login_type(session_obj=None):
     """
     Return "voter", "staff", "ambiguous" or None
     from the server-side session login flags.
     """
 
-    voter = session.get("authenticated") is True
-    staff = session.get("staff_authenticated") is True
+    active_session = (
+        session if session_obj is None else session_obj
+    )
+
+    voter = active_session.get("authenticated") is True
+    staff = active_session.get("staff_authenticated") is True
 
     if voter and staff:
         return "ambiguous"
