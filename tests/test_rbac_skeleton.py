@@ -242,10 +242,8 @@ def test_non_callable_audit_is_rejected():
 def test_matrix_document_matches_code():
     text = MATRIX_PATH.read_text(encoding="utf-8")
 
-    assert (
-        "Draft: staff role permissions are awaiting "
-        "Workstream B review (SR-06)." in text
-    )
+    # Approved by Workstream B (SR-06): no draft notice.
+    assert "Draft:" not in text
 
     rows = [
         line for line in text.splitlines()

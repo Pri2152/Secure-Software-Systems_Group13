@@ -1,7 +1,5 @@
 # Role-based access control matrix (SR-04)
 
-Draft: staff role permissions are awaiting Workstream B review (SR-06).
-
 Source of truth: `ROLE_PERMISSIONS` in `platform_security/rbac.py`.
 `tests/test_rbac_skeleton.py` fails if this table and the code differ.
 

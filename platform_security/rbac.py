@@ -12,8 +12,8 @@ Security controls:
   holds only "voter", a staff login only staff roles
 - Denied requests are reported to the audit hook (SR-17)
 
-Draft matrix: staff permissions await Workstream B
-review (SR-06). Local academic prototype.
+Matrix reviewed and approved by Workstream B (SR-06).
+Local academic prototype.
 """
 
 import logging

@@ -6,8 +6,8 @@ EXPECTED_PERMISSIONS is written out by hand and is
 deliberately not copied from ROLE_PERMISSIONS, so an
 accidental grant or removal in rbac.py fails the build.
 
-When Workstream B confirms the staff roles (SR-06),
-update rbac.py, docs/RBAC_MATRIX.md and this table.
+Approved by Workstream B (SR-06). Any later change
+must update rbac.py, docs/RBAC_MATRIX.md and this table.
 """
 
 import itertools
