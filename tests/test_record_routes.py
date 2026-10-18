@@ -36,6 +36,7 @@ def client():
         TESTING=True,
         SECRET_KEY="synthetic-test-secret",
         SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+        SQLALCHEMY_BINDS={"ballot": "sqlite:///:memory:", "audit": "sqlite:///:memory:"},
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         SESSION_TYPE="cachelib",
         SESSION_CACHELIB=SimpleCache(),

@@ -24,6 +24,7 @@ def database():
     test_app.config.update(
         TESTING=True,
         SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+        SQLALCHEMY_BINDS={"ballot": "sqlite:///:memory:", "audit": "sqlite:///:memory:"},
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
     )
 
