@@ -62,10 +62,10 @@ def test_workflow_token_is_read_only(workflow):
         }
 
 
-def test_job_uses_python_311_on_ubuntu(workflow, steps):
+def test_job_uses_python_311_on_ubuntu_2404(workflow, steps):
     job = workflow["jobs"]["test-and-scan"]
 
-    assert job["runs-on"] == "ubuntu-latest"
+    assert job["runs-on"] == "ubuntu-24.04"
 
     setup = [
         step for step in steps
