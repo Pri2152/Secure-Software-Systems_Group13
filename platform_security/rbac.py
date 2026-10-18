@@ -8,6 +8,8 @@ Security controls:
 - Unknown roles or permissions are denied
 - Role read from the server-side session only,
   never from request JSON, query or headers
+- Role must match the login type: a voter login
+  holds only "voter", a staff login only staff roles
 - Denied requests are reported to the audit hook (SR-17)
 
 Draft matrix: staff permissions await Workstream B
@@ -57,6 +59,9 @@ ROLE_PERMISSIONS = MappingProxyType({
 })
 
 
+VOTER_ROLE = "voter"
+
+
 def has_permission(role, permission):
     """
     Return True only when a known role explicitly
@@ -74,16 +79,60 @@ def has_permission(role, permission):
     )
 
 
-def _report_denial(audit, permission):
+def _login_type():
+    """
+    Return "voter", "staff", "ambiguous" or None
+    from the server-side session login flags.
+    """
+
+    voter = session.get("authenticated") is True
+    staff = session.get("staff_authenticated") is True
+
+    if voter and staff:
+        return "ambiguous"
+
+    if voter:
+        return "voter"
+
+    if staff:
+        return "staff"
+
+    return None
+
+
+def _role_matches_login(role, login_type):
+    """
+    Stop a role leaking across login types, for
+    example a voter session holding a staff role.
+    """
+
+    if login_type == "voter":
+        return role == VOTER_ROLE
+
+    if login_type == "staff":
+        return (
+            isinstance(role, str)
+            and role != VOTER_ROLE
+            and role in ROLE_PERMISSIONS
+        )
+
+    # An ambiguous session is never trusted.
+    return False
+
+
+def _report_denial(audit, permission, login_type):
     """
     Send an AUTHZ_DENIED event without letting an
     audit failure turn a denial into an allow.
+
+    Only the permission name is recorded, never
+    request data supplied by the caller.
     """
 
     # The stream follows the server-side login type,
     # not the claimed role, so a missing role on a
     # voter session is still a voter event.
-    if session.get("authenticated") is True:
+    if login_type == "voter":
         stream = "identity"
         actor_type = "voter"
         actor_id = session.get("voter_id")
@@ -110,7 +159,8 @@ def require_permission(permission, *, audit=None):
     Protect a Flask view with one named permission.
 
     401 when not authenticated, 403 when the
-    session role lacks the permission.
+    session role lacks the permission or does
+    not match the login type.
     """
 
     if not isinstance(permission, str) or not permission:
@@ -128,25 +178,28 @@ def require_permission(permission, *, audit=None):
         @wraps(view_function)
         def wrapper(*args, **kwargs):
 
-            if (
-                session.get("authenticated") is not True
-                and session.get("staff_authenticated")
-                is not True
-            ):
+            login_type = _login_type()
+
+            if login_type is None:
                 return jsonify({
                     "error": "Authentication required"
                 }), 401
 
             role = session.get("role")
 
-            if not has_permission(role, permission):
+            if (
+                not _role_matches_login(role, login_type)
+                or not has_permission(role, permission)
+            ):
                 logger.warning(
                     "authz_denied permission=%s",
                     permission
                 )
 
                 if audit is not None:
-                    _report_denial(audit, permission)
+                    _report_denial(
+                        audit, permission, login_type
+                    )
 
                 return jsonify({
                     "error": "Forbidden"
