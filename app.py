@@ -59,6 +59,10 @@ app.config.update(
     MISSION_ACCESS_POLICY=None,
 
     SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+    SQLALCHEMY_BINDS={
+        "ballot": os.environ.get("EVP_BALLOT_DB_URL", "sqlite:///:memory:"),
+        "audit": os.environ.get("EVP_AUDIT_DB_URL", "sqlite:///:memory:"),
+    },
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
 )
 
@@ -149,6 +153,7 @@ def establish_authenticated_session(
     active_session.clear()
     active_session["authenticated"] = True
     active_session["voter_id"] = verified_voter_id
+    active_session["role"] = "voter"
     active_session["last_activity"] = current_timestamp()
     active_session.permanent = True
 
