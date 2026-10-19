@@ -61,6 +61,13 @@ x-voter-access: &voter-access
     - gateway_runtime:application
   environment:
     EVP_LOCAL_LAB: "1"
+    # Trust X-EVP-* headers only from the gateway's fixed address,
+    # not the whole edge subnet (gateway_security.py, SR-07/SR-20).
+    EVP_TRUSTED_GATEWAY_NETWORKS: "172.30.0.10/32"
+    # Browser traffic on this PC reaches Nginx through Docker's port
+    # publishing and arrives from the edge network's gateway address.
+    # The lab treats that one address as the simulated overseas mission.
+    EVP_SIMULATED_MISSION_NETWORKS: "172.30.0.1/32"
   secrets:
     - source: voter_demo_voter
       target: /run/evp/demo-voter.json
@@ -83,7 +90,9 @@ services:
       - ../nginx/conf.d:/etc/nginx/conf.d:ro
       - ../nginx/certs:/etc/nginx/certs:ro
     networks:
-      - edge
+      edge:
+        # Fixed so voter-access can trust this one address only.
+        ipv4_address: 172.30.0.10
     depends_on:
       - voter-access-1
       - voter-access-2
@@ -210,7 +219,11 @@ services:
       - audit_net
 
 networks:
-  edge: {}
+  edge:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+          gateway: 172.30.0.1
   identity_net:
     internal: true
   ballot_net:

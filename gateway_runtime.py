@@ -22,6 +22,7 @@ from pathlib import Path
 
 from app import app
 from auth import hash_password
+from gateway_security import parse_network_list
 from login_flow import LoginCoordinator, VoterRecord
 from mission_access import MissionAccessPolicy
 from records import db, EnrolmentRecord, AddressRecord
@@ -35,6 +36,12 @@ DEMO_VOTER_PATH = Path(
     "/run/evp/demo-voter.json"
 )
 
+# Read once at start-up; invalid values stop the app.
+SIMULATED_MISSION_NETWORKS = parse_network_list(
+    os.environ.get("EVP_SIMULATED_MISSION_NETWORKS", "127.0.0.1/32"),
+    "EVP_SIMULATED_MISSION_NETWORKS"
+)
+
 
 def lab_country_lookup(source_ip):
     """
@@ -42,11 +49,16 @@ def lab_country_lookup(source_ip):
 
     Loopback represents a mock overseas mission
     only for this isolated local demonstration.
+    EVP_SIMULATED_MISSION_NETWORKS can replace it.
     """
 
     address = ipaddress.ip_address(source_ip)
 
-    if address == ipaddress.ip_address("127.0.0.1"):
+    if any(
+        address in network
+        for network in SIMULATED_MISSION_NETWORKS
+        if address.version == network.version
+    ):
         return "GB"
 
     raise LookupError(
@@ -133,7 +145,8 @@ def configure_local_gateway():
 
     policy = MissionAccessPolicy(
         mission_networks=[
-            "127.0.0.1/32"
+            str(network)
+            for network in SIMULATED_MISSION_NETWORKS
         ],
         registered_fingerprints=(
             load_registered_fingerprints()
