@@ -353,3 +353,182 @@ def test_simulated_mission_network_is_single_address(services, name):
     value = services[name]["environment"]["EVP_SIMULATED_MISSION_NETWORKS"]
 
     assert ipaddress.ip_network(value).num_addresses == 1
+
+
+# Policy check (guide section 3.4) and proof that it works
+
+SECRET_NAME = re.compile(r"PASSWORD|SECRET|TOKEN|CREDENTIAL|(^|_)KEY($|_)")
+URL_WITH_PASSWORD = re.compile(r"://[^/\s:@]+:[^@\s]+@")
+TOKEN_LIKE = re.compile(r"[A-Za-z0-9+/=_-]{16,}")
+
+
+def environment_items(service):
+    environment = service.get("environment") or {}
+
+    if isinstance(environment, list):
+        return [
+            tuple(entry.split("=", 1)) if "=" in entry else (entry, "")
+            for entry in environment
+        ]
+
+    return [(key, "" if value is None else str(value))
+            for key, value in environment.items()]
+
+
+def looks_like_secret(key, value):
+    import ipaddress
+
+    if SECRET_NAME.search(key.upper()) and not key.upper().endswith("_FILE"):
+        return True
+
+    if value.startswith("/run/secrets/"):
+        return False
+
+    if "BEGIN" in value or URL_WITH_PASSWORD.search(value):
+        return True
+
+    for token in TOKEN_LIKE.findall(value):
+        try:
+            ipaddress.ip_network(token, strict=False)
+            continue
+        except ValueError:
+            pass
+
+        if any(c.isdigit() for c in token) and any(c.isalpha() for c in token):
+            return True
+
+    return False
+
+
+def compose_violations(data):
+    """Return every SR-20 compose rule the data breaks."""
+
+    violations = []
+    services = data.get("services", {})
+    networks = data.get("networks", {})
+
+    def on(name):
+        return networks_of(services.get(name, {}))
+
+    if "identity_net" in on("ballot"):
+        violations.append("ballot is on identity_net")
+
+    for forbidden in ("identity_net", "edge"):
+        if forbidden in on("tally"):
+            violations.append(f"tally is on {forbidden}")
+
+    for name, settings in networks.items():
+        if name != "edge" and (settings or {}).get("internal") is not True:
+            violations.append(f"network {name} is not internal")
+
+    for name, network in DATABASES.items():
+        if on(name) != {network}:
+            violations.append(f"{name} is not only on {network}")
+
+    for name, service in services.items():
+        if "build" in service:
+            if service.get("restart") not in ("unless-stopped", "always"):
+                violations.append(f"{name} has no restart policy")
+            if not service.get("healthcheck", {}).get("test"):
+                violations.append(f"{name} has no healthcheck")
+
+        image = service.get("image", "")
+        tag = image.rsplit("/", 1)[-1].partition(":")[2]
+        if not tag or tag == "latest":
+            violations.append(f"{name} image {image!r} is not pinned")
+
+        for key, value in environment_items(service):
+            if looks_like_secret(key, value):
+                violations.append(f"{name} environment {key} looks like a secret")
+
+    return violations
+
+
+def test_real_compose_has_no_violations(compose):
+    assert compose_violations(compose) == []
+
+
+def mutate(compose, change):
+    import copy
+
+    data = copy.deepcopy(compose)
+    change(data["services"], data["networks"])
+    return data
+
+
+def test_check_catches_ballot_on_identity_net(compose):
+    broken = mutate(
+        compose,
+        lambda s, n: s["ballot"]["networks"].append("identity_net"),
+    )
+
+    assert "ballot is on identity_net" in compose_violations(broken)
+
+
+MUTATIONS = {
+    "tally on identity_net": (
+        lambda s, n: s["tally"]["networks"].append("identity_net"),
+        "tally is on identity_net",
+    ),
+    "tally on edge": (
+        lambda s, n: s["tally"]["networks"].append("edge"),
+        "tally is on edge",
+    ),
+    "ballot_net not internal": (
+        lambda s, n: n.__setitem__("ballot_net", {}),
+        "network ballot_net is not internal",
+    ),
+    "database on a second network": (
+        lambda s, n: s["db-ballot"]["networks"].append("edge"),
+        "db-ballot is not only on ballot_net",
+    ),
+    "app service without restart": (
+        lambda s, n: s["voter-access-1"].pop("restart"),
+        "voter-access-1 has no restart policy",
+    ),
+    "app service without healthcheck": (
+        lambda s, n: s["ballot"].pop("healthcheck"),
+        "ballot has no healthcheck",
+    ),
+    "latest image tag": (
+        lambda s, n: s["gateway"].__setitem__("image", "nginx:latest"),
+        "gateway image 'nginx:latest' is not pinned",
+    ),
+    "untagged image": (
+        lambda s, n: s["db-audit"].__setitem__("image", "mysql"),
+        "db-audit image 'mysql' is not pinned",
+    ),
+    "inline database password": (
+        lambda s, n: s["db-audit"]["environment"].__setitem__(
+            "MYSQL_ROOT_PASSWORD", "changeme"),
+        "db-audit environment MYSQL_ROOT_PASSWORD looks like a secret",
+    ),
+    "random-looking value": (
+        lambda s, n: s["tally"].__setitem__(
+            "environment", {"EVP_SETTING": "q8XvT2pLm9RzK4wN7bY3cJ6d"}),
+        "tally environment EVP_SETTING looks like a secret",
+    ),
+    "password inside a URL": (
+        lambda s, n: s["ballot"].__setitem__(
+            "environment",
+            ["EVP_BALLOT_DB_URL=mysql+pymysql://ballot_writer:hunter2@db-ballot/ballot_db"]),
+        "ballot environment EVP_BALLOT_DB_URL looks like a secret",
+    ),
+}
+
+
+@pytest.mark.parametrize("label", MUTATIONS)
+def test_check_catches_each_broken_rule(compose, label):
+    change, expected = MUTATIONS[label]
+
+    assert expected in compose_violations(mutate(compose, change))
+
+
+@pytest.mark.parametrize("key, value", [
+    ("EVP_LOCAL_LAB", "1"),
+    ("EVP_TRUSTED_GATEWAY_NETWORKS", "172.30.0.10/32"),
+    ("MYSQL_DATABASE", "identity_db"),
+    ("MYSQL_ROOT_PASSWORD_FILE", "/run/secrets/db_identity_root_password"),
+])
+def test_ordinary_settings_are_not_flagged(key, value):
+    assert looks_like_secret(key, value) is False
