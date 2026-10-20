@@ -23,6 +23,10 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519
+
 from .errors import AlgorithmUnavailable
 
 
@@ -131,8 +135,108 @@ class HmacAlgorithm(Algorithm):
         return hmac.compare_digest(self.compute(key, data), tag)
 
 
+def public_key_pem(public_key) -> bytes:
+    """SubjectPublicKeyInfo PEM of a public key."""
+
+    return public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+
+
+def check_key_pair(material: KeyMaterial, private_type, public_type) -> None:
+    """
+    The public key must have the expected type, and a
+    private key, if present, must match it.
+    """
+
+    if not isinstance(material.public_key, public_type):
+        raise ValueError("Invalid public key for algorithm")
+
+    if material.private_key is None:
+        return
+
+    if not isinstance(material.private_key, private_type):
+        raise ValueError("Invalid private key for algorithm")
+
+    if public_key_pem(material.private_key.public_key()) != public_key_pem(
+        material.public_key
+    ):
+        raise ValueError("Private and public keys do not match")
+
+
+class SigningAlgorithm(Algorithm):
+    """A digital signature scheme."""
+
+    private_key_type: type
+    public_key_type: type
+
+    def __init__(self, name: str):
+        super().__init__(name, SIGN)
+
+    def check_key(self, material: KeyMaterial) -> None:
+        check_key_pair(
+            material, self.private_key_type, self.public_key_type
+        )
+
+    def generate_key(self) -> KeyMaterial:
+        private_key = self._generate_private_key()
+
+        return KeyMaterial(
+            private_key=private_key,
+            public_key=private_key.public_key(),
+        )
+
+    def verify(self, public_key, data: bytes, signature: bytes) -> bool:
+        try:
+            self._verify(public_key, data, signature)
+        except InvalidSignature:
+            return False
+
+        return True
+
+
+class Ed25519Algorithm(SigningAlgorithm):
+    private_key_type = ed25519.Ed25519PrivateKey
+    public_key_type = ed25519.Ed25519PublicKey
+
+    def _generate_private_key(self):
+        return ed25519.Ed25519PrivateKey.generate()
+
+    def sign(self, private_key, data: bytes) -> bytes:
+        return private_key.sign(data)
+
+    def _verify(self, public_key, data: bytes, signature: bytes) -> None:
+        public_key.verify(signature, data)
+
+
+class EcdsaP256Algorithm(SigningAlgorithm):
+    """ECDSA on NIST P-256 with SHA-256 (DER signatures)."""
+
+    private_key_type = ec.EllipticCurvePrivateKey
+    public_key_type = ec.EllipticCurvePublicKey
+
+    def check_key(self, material: KeyMaterial) -> None:
+        super().check_key(material)
+
+        if not isinstance(material.public_key.curve, ec.SECP256R1):
+            raise ValueError("ECDSA key must use curve P-256")
+
+    def _generate_private_key(self):
+        return ec.generate_private_key(ec.SECP256R1())
+
+    def sign(self, private_key, data: bytes) -> bytes:
+        return private_key.sign(data, ec.ECDSA(hashes.SHA256()))
+
+    def _verify(self, public_key, data: bytes, signature: bytes) -> None:
+        public_key.verify(signature, data, ec.ECDSA(hashes.SHA256()))
+
+
 SHA256 = HashAlgorithm("sha256", hashlib.sha256)
 SHA3_256 = HashAlgorithm("sha3-256", hashlib.sha3_256)
 
 HMAC_SHA256 = HmacAlgorithm("hmac-sha256", hashlib.sha256)
 HMAC_SHA3_256 = HmacAlgorithm("hmac-sha3-256", hashlib.sha3_256)
+
+ED25519 = Ed25519Algorithm("ed25519")
+ECDSA_P256_SHA256 = EcdsaP256Algorithm("ecdsa-p256-sha256")

@@ -24,7 +24,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Mapping
 
-from .algorithms import FAMILIES, HASH, MAC
+from .algorithms import FAMILIES, HASH, MAC, SIGN
 from .errors import (
     AlgorithmNotAllowed,
     AlgorithmUnavailable,
@@ -192,9 +192,11 @@ DEFAULT_POLICY = CryptoPolicy(
     defaults={
         HASH: "sha256",
         MAC: "hmac-sha256",
+        SIGN: "ed25519",
     },
     allowed={
         HASH: {"sha256", "sha3-256"},
         MAC: {"hmac-sha256", "hmac-sha3-256"},
+        SIGN: {"ed25519", "ecdsa-p256-sha256"},
     },
 )

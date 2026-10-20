@@ -24,8 +24,8 @@ import base64
 import binascii
 import hmac
 
-from .algorithms import HASH, MAC
-from .errors import CryptoError, InvalidEnvelope
+from .algorithms import HASH, MAC, SIGN, public_key_pem
+from .errors import CryptoError, InvalidEnvelope, KeyNotFound
 from .keys import KeyStore, check_purpose
 from .policy import CryptoPolicy
 from .registry import AlgorithmRegistry, CryptoFactory
@@ -96,7 +96,7 @@ def parse_envelope(envelope, binary_fields: dict[str, int]) -> dict:
 
 
 class CryptoService:
-    """Hashing, MACs and (later) signatures and encryption by purpose."""
+    """Hashing, MACs, signatures and encryption by purpose."""
 
     def __init__(
         self,
@@ -182,6 +182,58 @@ class CryptoService:
 
         except VERIFY_FAILURES:
             return False
+
+    # Digital signatures
+
+    def sign(self, purpose: str, data: bytes) -> dict:
+        """Signature envelope {"alg", "kid", "v", "sig"}."""
+
+        check_purpose(purpose)
+        _require_bytes(data)
+
+        algorithm = self.factory.for_new(SIGN)
+        key = self.keys.current(purpose, algorithm)
+
+        if key.material.private_key is None:
+            raise KeyNotFound("No private signing key for this purpose")
+
+        return self._envelope(
+            algorithm.name,
+            key.kid,
+            sig=algorithm.sign(key.material.private_key, data),
+        )
+
+    def verify(self, purpose: str, data: bytes, envelope) -> bool:
+        """
+        Verify with the algorithm and key named in the
+        envelope. False (never raises) on any problem.
+        """
+
+        try:
+            check_purpose(purpose)
+            _require_bytes(data)
+
+            fields = parse_envelope(envelope, {"sig": MAX_TAG_B64_LENGTH})
+            algorithm = self.factory.for_verify(SIGN, fields["alg"])
+            key = self.keys.get(fields["kid"], purpose, algorithm)
+
+            return algorithm.verify(
+                key.material.public_key, data, fields["sig"]
+            )
+
+        except VERIFY_FAILURES:
+            return False
+
+    def public_key_pem(self, purpose: str) -> bytes:
+        """PEM public key of the current signing key."""
+
+        check_purpose(purpose)
+
+        algorithm = self.factory.for_new(SIGN)
+
+        return public_key_pem(
+            self.keys.current(purpose, algorithm).material.public_key
+        )
 
     @staticmethod
     def _envelope(alg: str, kid: str, **binary_fields: bytes) -> dict:

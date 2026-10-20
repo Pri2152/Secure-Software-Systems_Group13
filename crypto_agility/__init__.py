@@ -7,6 +7,8 @@ Usage (handbook section 6.1):
 
     value = crypto.hash(data)               # "sha256:<hex>"
     envelope = crypto.mac("audit", data)    # {"alg", "kid", "v", "sig"}
+    envelope = crypto.sign("ballot", data)  # {"alg", "kid", "v", "sig"}
+    ok = crypto.verify("ballot", data, envelope)
 
 Security controls:
 - Algorithm registry and secure factory: the crypto
@@ -137,6 +139,15 @@ class _ConfiguredCrypto:
 
     def verify_mac(self, purpose: str, data: bytes, envelope) -> bool:
         return get_service().verify_mac(purpose, data, envelope)
+
+    def sign(self, purpose: str, data: bytes) -> dict:
+        return get_service().sign(purpose, data)
+
+    def verify(self, purpose: str, data: bytes, envelope) -> bool:
+        return get_service().verify(purpose, data, envelope)
+
+    def public_key_pem(self, purpose: str) -> bytes:
+        return get_service().public_key_pem(purpose)
 
 
 crypto = _ConfiguredCrypto()
