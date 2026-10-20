@@ -9,9 +9,12 @@ compatibility with Workstream E's SR-04 RBAC.
 import pytest
 from flask import jsonify
 
+from admin import find_staff_account
 from admin.sessions import INACTIVITY_LIMIT_SECONDS
+from records import db
 from staff_support import (
     HTTPS_URL,
+    PASSWORD,
     login_as,
     staff_environment,
     staff_request,
@@ -211,3 +214,51 @@ def test_session_is_accepted_by_workstream_e_rbac(env):
 
     login_as(env, "li")
     assert staff_request(env.client, "get", "/rbac-probe").status_code == 403
+
+
+# Test 15: Deactivating an account ends its open session
+def test_deactivated_account_session_is_revoked(env):
+    login_as(env, "jane")
+    assert status(env) == 200
+
+    with env.app.app_context():
+        find_staff_account(db.session, "officer-jane-citizen").is_active = False
+        db.session.commit()
+
+    response = staff_request(env.client, "get", "/staff/session")
+
+    assert response.status_code == 401
+    assert response.get_json() == {"error": "Authentication required"}
+    assert env.audit.events[-1]["event_type"] == "STAFF_SESSION_REVOKED"
+    assert env.audit.events[-1]["actor_id"] == "officer-jane-citizen"
+    assert session_keys(env).get("staff_id") is None
+
+
+# Test 16: A session for an account that no longer exists is revoked
+def test_missing_account_session_is_revoked(env):
+    login_as(env, "jane")
+
+    with env.client.session_transaction() as current:
+        current["staff_id"] = "officer-ghost-person"
+
+    assert status(env) == 401
+    assert env.audit.events[-1]["event_type"] == "STAFF_SESSION_REVOKED"
+
+
+# Test 17: Revocation also clears the account's elevations
+def test_revoked_session_clears_elevations(env):
+    login_as(env, "grace")
+    staff_request(env.client, "post", "/staff/elevate",
+                  {"permission": "audit.read", "password": PASSWORD},
+                  pem=env.pems["grace"])
+
+    with env.app.app_context():
+        find_staff_account(db.session, "auditor-grace-hopper").is_active = False
+        db.session.commit()
+
+    status(env)
+
+    with env.app.app_context():
+        assert env.services.elevation.active_permissions(
+            "auditor-grace-hopper"
+        ) == []

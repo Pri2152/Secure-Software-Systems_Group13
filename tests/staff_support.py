@@ -23,11 +23,16 @@ from flask_session import Session
 from flask_wtf.csrf import CSRFProtect
 
 from admin import create_staff_account
+from admin.accounts import staff_account_is_active
+from admin.dual_authorisation import DualAuthorisationService
+from admin.operation_routes import create_operations_blueprint
 from admin.elevation import ElevationService
 from admin.login import StaffAuthenticator
 from admin.routes import create_staff_blueprint
 from admin.sessions import StaffSessions
 from audit.events import validate_event
+from crypto_agility import CryptoService, DEFAULT_POLICY, default_registry
+from crypto_agility.keys import KeyStore
 from rate_limit import LoginRateLimiter
 from records import db
 
@@ -173,6 +178,9 @@ PEOPLE = {
     "li": ("delegate-li-wei", "Li Wei", "delegate"),
     "grace": ("auditor-grace-hopper", "Grace Hopper", "auditor"),
     "ada": ("admin-ada-lovelace", "Ada Lovelace", "administrator"),
+    # Second officers for the SR-06 two-person rule
+    "noah": ("delegate-noah-brown", "Noah Brown", "delegate"),
+    "mia": ("officer-mia-chen", "Mia Chen", "officer"),
 }
 
 
@@ -222,7 +230,13 @@ def wire_staff(app, recorder, clock) -> SimpleNamespace:
         rate_limiter=LoginRateLimiter(clock=clock),
         audit=recorder,
     )
-    sessions = StaffSessions(audit=recorder, clock=clock)
+    sessions = StaffSessions(
+        audit=recorder,
+        clock=clock,
+        account_is_active=lambda staff_id: staff_account_is_active(
+            db.session, staff_id
+        ),
+    )
     require_permission, has_permission = rbac_functions()
     elevation = ElevationService(
         db_session=lambda: db.session,
@@ -232,12 +246,25 @@ def wire_staff(app, recorder, clock) -> SimpleNamespace:
         audit=recorder,
     )
 
+    dual = DualAuthorisationService(
+        db_session=lambda: db.session,
+        crypto=CryptoService(
+            default_registry(), DEFAULT_POLICY, KeyStore.ephemeral()
+        ),
+        audit=recorder,
+        clock=clock,
+    )
+
     app.register_blueprint(create_staff_blueprint(
         authenticator=authenticator, sessions=sessions, elevation=elevation,
+    ))
+    app.register_blueprint(create_operations_blueprint(
+        sessions=sessions, elevation=elevation, service=dual,
     ))
 
     return SimpleNamespace(
         authenticator=authenticator, sessions=sessions, elevation=elevation,
+        dual=dual,
     )
 
 
@@ -288,3 +315,17 @@ def login_as(env, name, password=PASSWORD, pem="own", **kwargs):
         {"staff_id": PEOPLE[name][0], "password": password},
         pem=pem, **kwargs,
     )
+
+
+def act_as(env, name, *permissions):
+    """Log in as a person and elevate for each permission."""
+
+    login_as(env, name)
+
+    for permission in permissions:
+        response = staff_request(
+            env.client, "post", "/staff/elevate",
+            {"permission": permission, "password": PASSWORD},
+            pem=env.pems[name],
+        )
+        assert response.status_code == 200
