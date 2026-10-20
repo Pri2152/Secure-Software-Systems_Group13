@@ -8,6 +8,10 @@ Security controls:
   stream, so gaps and duplicates are detectable
 - Server-side UTC timestamp and actor identity on
   every entry (except the anonymous ballot stream)
+- Database triggers abort every UPDATE and DELETE on
+  the audit table (defence in depth below the app);
+  SQLite triggers are created with the table, MySQL
+  triggers are in deploy/db/audit_triggers.sql
 - Separate metadata from the voter/identity models:
   the table lives in the audit database (E's "audit"
   bind / EVP_AUDIT_DB_URL), never in the identity DB
@@ -17,13 +21,17 @@ Local academic prototype.
 
 import json
 
-from sqlalchemy import Integer, String, Text, UniqueConstraint
+from sqlalchemy import DDL, Integer, String, Text, UniqueConstraint, event
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 AUDIT_TABLE = "audit_log"
 
 HASH_COLUMN_LENGTH = 512
+
+APPEND_ONLY_MESSAGE = "audit_log is append-only"
+NO_UPDATE_TRIGGER = "audit_log_no_update"
+NO_DELETE_TRIGGER = "audit_log_no_delete"
 
 
 class AuditBase(DeclarativeBase):
@@ -67,3 +75,40 @@ class AuditEntry(AuditBase):
             "outcome": self.outcome,
             "details": json.loads(self.details_json),
         }
+
+
+def _sqlite_block_trigger(name: str, operation: str) -> DDL:
+    return DDL(
+        f"CREATE TRIGGER IF NOT EXISTS {name} "
+        f"BEFORE {operation} ON {AUDIT_TABLE} "
+        f"BEGIN SELECT RAISE(ABORT, '{APPEND_ONLY_MESSAGE}'); END"
+    ).execute_if(dialect="sqlite")
+
+
+event.listen(
+    AuditEntry.__table__,
+    "after_create",
+    _sqlite_block_trigger(NO_UPDATE_TRIGGER, "UPDATE"),
+)
+event.listen(
+    AuditEntry.__table__,
+    "after_create",
+    _sqlite_block_trigger(NO_DELETE_TRIGGER, "DELETE"),
+)
+
+
+def ensure_triggers(engine) -> None:
+    """
+    (Re)create the SQLite triggers on an existing
+    table. Idempotent; MySQL uses the deploy SQL file.
+    """
+
+    if engine.dialect.name != "sqlite":
+        return
+
+    with engine.begin() as connection:
+        for name, operation in (
+            (NO_UPDATE_TRIGGER, "UPDATE"),
+            (NO_DELETE_TRIGGER, "DELETE"),
+        ):
+            connection.execute(_sqlite_block_trigger(name, operation))

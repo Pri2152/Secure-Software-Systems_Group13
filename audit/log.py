@@ -40,7 +40,7 @@ from .chain import (
 )
 from .events import STREAMS, validate_event
 from .filters import sanitize_details
-from .models import AuditBase, AuditEntry
+from .models import AuditBase, AuditEntry, ensure_triggers
 
 
 MAX_READ_LIMIT = 200
@@ -77,6 +77,7 @@ class AuditLog:
 
     def create_schema(self) -> None:
         AuditBase.metadata.create_all(self.engine)
+        ensure_triggers(self.engine)
 
     def record_event(
         self,
