@@ -28,6 +28,8 @@ Security controls:
   (install_audit_handler at application start-up)
 - Signed checkpoints every 50 entries per stream go to
   a separate append-only archive (EVP_AUDIT_ARCHIVE)
+- Auditor-only read/verify endpoints
+  (create_audit_blueprint), with every access audited
 - Fails closed: if no audit database is configured,
   record_event raises AuditNotConfigured instead of
   silently dropping security events
@@ -63,6 +65,7 @@ from .events import (
 )
 from .handler import AuditLogHandler, install_audit_handler
 from .log import AuditLog
+from .routes import create_audit_blueprint
 
 
 ENV_AUDIT_DB_URL = "EVP_AUDIT_DB_URL"
