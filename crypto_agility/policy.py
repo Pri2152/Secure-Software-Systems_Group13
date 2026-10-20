@@ -24,7 +24,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Mapping
 
-from .algorithms import AEAD, FAMILIES, HASH, MAC, SEAL, SIGN
+from .algorithms import AEAD, FAMILIES, HASH, MAC, PASSWORD, SEAL, SIGN
 from .errors import (
     AlgorithmNotAllowed,
     AlgorithmUnavailable,
@@ -195,6 +195,7 @@ DEFAULT_POLICY = CryptoPolicy(
         SIGN: "ed25519",
         AEAD: "aes-256-gcm",
         SEAL: "rsa-oaep-sha256+aes-256-gcm",
+        PASSWORD: "argon2id-v1",
     },
     allowed={
         HASH: {"sha256", "sha3-256"},
@@ -203,5 +204,7 @@ DEFAULT_POLICY = CryptoPolicy(
         # chacha20-poly1305 is registered but must be enabled by policy
         AEAD: {"aes-256-gcm"},
         SEAL: {"rsa-oaep-sha256+aes-256-gcm"},
+        PASSWORD: {"argon2id-v1"},
+        # ml-dsa-65 (post-quantum) is reserved and cannot be allowed yet
     },
 )

@@ -23,6 +23,8 @@ Security controls:
 - Sealing (RSA-OAEP + AES-256-GCM) lets voter clients
   encrypt with only the public "election" key; only
   the compartment holding the private key can open
+- Password hashing uses the policy's Argon2id
+  parameter set, with rehash-on-login migration
 
 Local academic prototype.
 """
@@ -31,7 +33,15 @@ import base64
 import binascii
 import hmac
 
-from .algorithms import AEAD, HASH, MAC, SEAL, SIGN, public_key_pem
+from .algorithms import (
+    AEAD,
+    HASH,
+    MAC,
+    PASSWORD,
+    SEAL,
+    SIGN,
+    public_key_pem,
+)
 from .errors import (
     CryptoError,
     DecryptionError,
@@ -39,6 +49,7 @@ from .errors import (
     KeyNotFound,
 )
 from .keys import KeyStore, check_purpose
+from .passwords import verify_and_upgrade
 from .policy import CryptoPolicy
 from .registry import AlgorithmRegistry, CryptoFactory
 
@@ -368,6 +379,20 @@ class CryptoService:
 
         except VERIFY_FAILURES:
             raise DecryptionError("Decryption failed") from None
+
+    # Password hashing (Argon2id parameter sets)
+
+    def hash_password(self, password: str) -> str:
+        return self.factory.for_new(PASSWORD).hash(password)
+
+    def verify_and_upgrade_password(
+        self, stored_hash: str, password: str
+    ) -> tuple[bool, str | None]:
+        """(ok, new_hash_or_None): rehash-on-login helper."""
+
+        return verify_and_upgrade(
+            stored_hash, password, self.factory.for_new(PASSWORD)
+        )
 
     @staticmethod
     def _envelope(alg: str, kid: str, **binary_fields: bytes) -> dict:

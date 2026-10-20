@@ -25,14 +25,23 @@ Security controls:
   algorithms are replaced without code changes
 - Self-describing, versioned outputs that still
   verify after the default algorithm changes
+- Keys loaded from secrets, never from Git, and
+  identified by version (key ID) for rotation
+- Reserved, disabled post-quantum signature slot
+  (ml-dsa-65) documenting the migration path
 - Fails closed: with no key configuration in the
   environment, the first crypto call raises
   CryptoNotConfigured instead of using weak defaults
 
 Configuration (environment):
+- EVP_KEY_DIR            directory of key files plus
+                         manifest.json (Docker secrets);
+                         see keys.KeyStore.from_directory
 - EVP_CRYPTO_DEV_KEYS=1  generate throwaway keys in
-  memory (development and tests only)
+                         memory (development/tests only)
 - EVP_CRYPTO_POLICY      path to a policy JSON file
+With neither EVP_KEY_DIR nor EVP_CRYPTO_DEV_KEYS=1,
+crypto raises CryptoNotConfigured.
 
 Local academic prototype.
 """
@@ -58,6 +67,7 @@ from .registry import AlgorithmRegistry, CryptoFactory, default_registry
 from .service import CryptoService
 
 
+ENV_KEY_DIR = "EVP_KEY_DIR"
 ENV_DEV_KEYS = "EVP_CRYPTO_DEV_KEYS"
 ENV_POLICY = "EVP_CRYPTO_POLICY"
 
@@ -69,6 +79,7 @@ _service_lock = threading.Lock()
 
 def build_service(
     *,
+    key_dir: str | None = None,
     dev_keys: bool = False,
     policy: CryptoPolicy | None = None,
     policy_path: str | None = None,
@@ -88,7 +99,9 @@ def build_service(
             else DEFAULT_POLICY
         )
 
-    if dev_keys:
+    if key_dir:
+        keystore = KeyStore.from_directory(key_dir, registry)
+    elif dev_keys:
         logger.warning("crypto_dev_keys_in_use")
         keystore = KeyStore.ephemeral()
     else:
@@ -101,6 +114,7 @@ def build_service_from_env(environ=None) -> CryptoService:
     environ = os.environ if environ is None else environ
 
     return build_service(
+        key_dir=environ.get(ENV_KEY_DIR) or None,
         dev_keys=environ.get(ENV_DEV_KEYS) == "1",
         policy_path=environ.get(ENV_POLICY) or None,
     )
@@ -170,6 +184,16 @@ class _ConfiguredCrypto:
 
     def open(self, purpose: str, envelope) -> bytes:
         return get_service().open(purpose, envelope)
+
+    def hash_password(self, password: str) -> str:
+        return get_service().hash_password(password)
+
+    def verify_and_upgrade_password(
+        self, stored_hash: str, password: str
+    ) -> tuple[bool, str | None]:
+        return get_service().verify_and_upgrade_password(
+            stored_hash, password
+        )
 
 
 crypto = _ConfiguredCrypto()

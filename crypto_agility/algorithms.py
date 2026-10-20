@@ -23,7 +23,11 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from cryptography.exceptions import InvalidSignature, InvalidTag
+from cryptography.exceptions import (
+    InvalidSignature,
+    InvalidTag,
+    UnsupportedAlgorithm,
+)
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import (
     ec,
@@ -159,6 +163,32 @@ def public_key_pem(public_key) -> bytes:
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     )
+
+
+def load_pem_key_material(pem: bytes) -> KeyMaterial:
+    """
+    Load an unencrypted PEM private key (with its
+    public key) or a PEM public key on its own.
+    Raises ValueError for anything else.
+    """
+
+    try:
+        if b"PRIVATE KEY" in pem:
+            private_key = serialization.load_pem_private_key(
+                pem, password=None
+            )
+
+            return KeyMaterial(
+                private_key=private_key,
+                public_key=private_key.public_key(),
+            )
+
+        return KeyMaterial(
+            public_key=serialization.load_pem_public_key(pem)
+        )
+
+    except (TypeError, UnsupportedAlgorithm):
+        raise ValueError("Key file is not a usable PEM key") from None
 
 
 def check_key_pair(material: KeyMaterial, private_type, public_type) -> None:
@@ -377,3 +407,9 @@ AES_256_GCM = AeadAlgorithm("aes-256-gcm", AESGCM)
 CHACHA20_POLY1305 = AeadAlgorithm("chacha20-poly1305", ChaCha20Poly1305)
 
 RSA_OAEP_AES_256_GCM = RsaOaepAesGcmSeal("rsa-oaep-sha256+aes-256-gcm")
+
+# Reserved post-quantum signature slot (FIPS 204 ML-DSA-65).
+# Disabled: no implementation in the course toolset; the
+# migration path is to implement it here, then enable it
+# in the crypto policy. Policy validation rejects it now.
+ML_DSA_65 = ReservedAlgorithm("ml-dsa-65", SIGN)

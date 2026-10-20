@@ -16,7 +16,7 @@ Security controls:
 Local academic prototype.
 """
 
-from . import algorithms
+from . import algorithms, passwords
 from .algorithms import Algorithm
 from .errors import (
     AlgorithmNotAllowed,
@@ -82,6 +82,8 @@ def default_registry() -> AlgorithmRegistry:
         algorithms.AES_256_GCM,
         algorithms.CHACHA20_POLY1305,
         algorithms.RSA_OAEP_AES_256_GCM,
+        algorithms.ML_DSA_65,
+        passwords.ARGON2ID_V1,
     ])
 
 
