@@ -12,6 +12,9 @@ Security controls:
   (crypto_agility.passwords, SR-14)
 - Elevation grants are stored server-side with an
   expiry, so a client cannot create or extend one
+- SR-06: every critical change is a PendingOperation
+  bound to a digest of its exact payload and to two
+  named officers (proposer and approver)
 - Lives on the identity (default) database with the
   other identity records, never on the ballot bind
 
@@ -27,6 +30,14 @@ ROLE_MAX_LENGTH = 32
 FINGERPRINT_LENGTH = 64
 PASSWORD_HASH_MAX_LENGTH = 255
 PERMISSION_MAX_LENGTH = 64
+
+DIVISION_MAX_LENGTH = 64
+CANDIDATE_NAME_MAX_LENGTH = 128
+PARTY_MAX_LENGTH = 128
+OP_TYPE_MAX_LENGTH = 32
+STATUS_MAX_LENGTH = 16
+PAYLOAD_HASH_MAX_LENGTH = 128
+COURT_ORDER_REF_MAX_LENGTH = 64
 
 
 class StaffAccount(db.Model):
@@ -95,3 +106,65 @@ class ElevationGrant(db.Model):
 
     # Set once the expiry has been written to the audit log
     expiry_recorded = db.Column(db.Boolean, nullable=False, default=False)
+
+
+class Candidate(db.Model):
+    """A candidate in one division (SR-06 candidate lists)."""
+
+    __tablename__ = "candidates"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "division", "position_in_group",
+            name="uq_candidate_division_position",
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    division = db.Column(
+        db.String(DIVISION_MAX_LENGTH), nullable=False, index=True
+    )
+    name = db.Column(db.String(CANDIDATE_NAME_MAX_LENGTH), nullable=False)
+    party = db.Column(db.String(PARTY_MAX_LENGTH), nullable=False)
+    position_in_group = db.Column(db.Integer, nullable=False)
+
+    # DRAFT -> FINAL (dual-authorised) -> EXCLUDED (court order)
+    status = db.Column(
+        db.String(STATUS_MAX_LENGTH), nullable=False, default="DRAFT"
+    )
+
+
+class PendingOperation(db.Model):
+    """A critical operation awaiting a second officer (maker-checker)."""
+
+    __tablename__ = "pending_operations"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    op_type = db.Column(db.String(OP_TYPE_MAX_LENGTH), nullable=False)
+    payload_json = db.Column(db.Text, nullable=False)
+    payload_hash = db.Column(
+        db.String(PAYLOAD_HASH_MAX_LENGTH), nullable=False
+    )
+
+    proposer_id = db.Column(
+        db.String(STAFF_ID_MAX_LENGTH),
+        db.ForeignKey("staff_accounts.staff_id"),
+        nullable=False,
+    )
+    approver_id = db.Column(
+        db.String(STAFF_ID_MAX_LENGTH),
+        db.ForeignKey("staff_accounts.staff_id"),
+    )
+
+    # PROPOSED -> APPROVED -> EXECUTED, or REJECTED / EXPIRED
+    status = db.Column(
+        db.String(STATUS_MAX_LENGTH), nullable=False, default="PROPOSED"
+    )
+
+    created_at = db.Column(db.Float, nullable=False)
+    expires_at = db.Column(db.Float, nullable=False)
+    decided_at = db.Column(db.Float)
+    executed_at = db.Column(db.Float)
+
+    court_order_ref = db.Column(db.String(COURT_ORDER_REF_MAX_LENGTH))
