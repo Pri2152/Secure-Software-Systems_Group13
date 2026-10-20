@@ -184,6 +184,28 @@ class ElevationService:
 
         return len(grants)
 
+    def refusal(self, permission: str):
+        """
+        For routes whose permission depends on the request
+        (e.g. the operation type): None when the session's
+        role holds the permission and an active grant
+        exists, otherwise the 403 response to return.
+        """
+
+        staff_id = session.get("staff_id")
+
+        if not self.role_allows(session.get("role"), permission):
+            return jsonify({"error": "Forbidden"}), 403
+
+        if self.active_grant(staff_id, permission) is None:
+            self._audit(
+                "STAFF_ELEVATION_REQUIRED", "denied", staff_id,
+                {"permission": permission},
+            )
+            return jsonify({"error": "Elevation required"}), 403
+
+        return None
+
     def require_elevated(self, permission: str):
         """
         Decorator for privileged routes: staff session,

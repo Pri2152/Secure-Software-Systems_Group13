@@ -217,3 +217,11 @@ def find_staff_account(db_session, staff_id) -> StaffAccount | None:
     return db_session.scalar(
         select(StaffAccount).where(StaffAccount.staff_id == normalized_id)
     )
+
+
+def staff_account_is_active(db_session, staff_id) -> bool:
+    """True only for an existing, active account."""
+
+    account = find_staff_account(db_session, staff_id)
+
+    return account is not None and account.is_active is True

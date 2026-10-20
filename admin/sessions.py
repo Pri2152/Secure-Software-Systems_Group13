@@ -10,8 +10,12 @@ Security controls:
 - 10-minute inactivity timeout, as for voters (SR-16)
 - A voter session, or a session with both voter and
   staff flags, can never use staff endpoints
+- Every request re-checks that the staff account still
+  exists and is active; otherwise the session is ended
+  at once (STAFF_SESSION_REVOKED), so deactivating an
+  account also cuts off sessions that are already open
 - Starting or ending a session (login, logout, idle
-  expiry) runs the registered reset hooks, so a new
+  expiry, revocation) runs the registered reset hooks, so a new
   session never inherits privileges (e.g. elevations);
   ending a session is audited on the admin stream
 
@@ -60,9 +64,16 @@ class StaffSessions:
         *,
         audit: Callable,
         clock: Callable[[], float] = time.time,
+        account_is_active: Callable[[str], bool] | None = None,
     ):
+        """
+        account_is_active(staff_id) -> bool is checked on
+        every request; None skips the check (tests only).
+        """
+
         self.audit = audit
         self.clock = clock
+        self.account_is_active = account_is_active
         self._reset_hooks: list[Callable[[str], None]] = []
 
     def add_reset_hook(self, hook: Callable[[str], None]) -> None:
@@ -126,8 +137,17 @@ class StaffSessions:
 
         @wraps(view_function)
         def wrapper(*args, **kwargs):
-            if self.current_staff_id() is None:
+            staff_id = self.current_staff_id()
+
+            if staff_id is None:
                 session.clear()
+                return jsonify({"error": "Authentication required"}), 401
+
+            if (
+                self.account_is_active is not None
+                and self.account_is_active(staff_id) is not True
+            ):
+                self.end("STAFF_SESSION_REVOKED")
                 return jsonify({"error": "Authentication required"}), 401
 
             now = self.clock()
