@@ -315,3 +315,17 @@ def login_as(env, name, password=PASSWORD, pem="own", **kwargs):
         {"staff_id": PEOPLE[name][0], "password": password},
         pem=pem, **kwargs,
     )
+
+
+def act_as(env, name, *permissions):
+    """Log in as a person and elevate for each permission."""
+
+    login_as(env, name)
+
+    for permission in permissions:
+        response = staff_request(
+            env.client, "post", "/staff/elevate",
+            {"permission": permission, "password": PASSWORD},
+            pem=env.pems[name],
+        )
+        assert response.status_code == 200

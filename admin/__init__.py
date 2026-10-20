@@ -18,6 +18,13 @@ Security controls:
   privileged route
 - Every login, step-up, elevation, expiry and revoke
   is audited on the admin stream (SR-17)
+- SR-06 maker-checker: candidate-list finalisation,
+  court-ordered exclusion and bulk roll updates need a
+  proposer and a different approver, both elevated;
+  approval is bound to the payload digest and executes
+  atomically once; database triggers back up the
+  two-person rule; final candidate lists are read-only
+  (final_candidate_list for Workstream C)
 
 Wiring (e.g. in the admin compartment's wsgi.py):
 
@@ -39,22 +46,37 @@ Wiring (e.g. in the admin compartment's wsgi.py):
         sessions=sessions,
         elevation=elevation,
     ))
+    app.register_blueprint(create_operations_blueprint(
+        sessions=sessions,
+        elevation=elevation,
+        service=DualAuthorisationService(
+            db_session=lambda: db.session,
+            crypto=crypto,
+            audit=record_event,
+            clock=sessions.clock,
+        ),
+    ))
 
-    @bp.post("/admin/operations")
-    @elevation.require_elevated("candidates.propose_finalise")
-    def propose(): ...
+    # Any other privileged route:
+    @bp.post("/admin/something")
+    @elevation.require_elevated("config.read")
+    def something(): ...
 
 Local academic prototype.
 """
 
+from . import triggers  # noqa: F401  (SR-06 trigger backstop)
 from .accounts import (
     STAFF_ROLES,
     StaffAccountError,
     create_staff_account,
     find_staff_account,
 )
+from .candidates import CandidateListNotFinal, final_candidate_list
+from .dual_authorisation import DualAuthorisationService
 from .elevation import ELEVATION_SECONDS, ElevationService
 from .login import StaffAuthenticator
-from .models import ElevationGrant, StaffAccount
+from .models import Candidate, ElevationGrant, PendingOperation, StaffAccount
+from .operation_routes import create_operations_blueprint
 from .routes import create_staff_blueprint
 from .sessions import INACTIVITY_LIMIT_SECONDS, StaffSessions

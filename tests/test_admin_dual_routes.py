@@ -13,6 +13,7 @@ from admin.candidates import add_draft_candidate
 from records import db
 from staff_support import (
     PASSWORD,
+    act_as,
     login_as,
     staff_environment,
     staff_request,
@@ -36,20 +37,6 @@ def env():
             db.session.commit()
 
         yield environment
-
-
-def act_as(env, name, *permissions):
-    """Log in as a person and elevate for each permission."""
-
-    login_as(env, name)
-
-    for permission in permissions:
-        response = staff_request(
-            env.client, "post", "/staff/elevate",
-            {"permission": permission, "password": PASSWORD},
-            pem=env.pems[name],
-        )
-        assert response.status_code == 200
 
 
 def propose(env, payload=None, op_type="FINALISE_CANDIDATE_LIST"):
@@ -154,6 +141,7 @@ def test_second_officer_approves(env, proposed):
     response = approve(env, proposed["id"], proposed["payload_hash"])
 
     assert response.status_code == 200
+    assert response.get_json()["status"] == "EXECUTED"
     assert response.get_json()["approver_id"] == "delegate-noah-brown"
     assert response.get_json()["proposer_id"] == "delegate-li-wei"
 
