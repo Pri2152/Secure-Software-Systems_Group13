@@ -7,7 +7,9 @@ memory with `cryptography`; nothing is written to disk.
 
 import datetime
 
+from contextlib import contextmanager
 from datetime import timedelta
+from types import SimpleNamespace
 from urllib.parse import quote
 
 from cachelib import SimpleCache
@@ -19,7 +21,12 @@ from flask import Flask
 from flask_session import Session
 from flask_wtf.csrf import CSRFProtect
 
+from admin import create_staff_account
+from admin.login import StaffAuthenticator
+from admin.routes import create_staff_blueprint
+from admin.sessions import StaffSessions
 from audit.events import validate_event
+from rate_limit import LoginRateLimiter
 from records import db
 
 
@@ -152,4 +159,79 @@ def staff_request(client, method, path, payload=None, pem=None,
         json=payload,
         headers=headers,
         environ_overrides={"REMOTE_ADDR": peer},
+    )
+
+
+PASSWORD = "Staff-Password-2026!"
+START_TIME = 1700000000.0
+
+# name -> (staff_id, full name, role)
+PEOPLE = {
+    "jane": ("officer-jane-citizen", "Jane Citizen", "officer"),
+    "li": ("delegate-li-wei", "Li Wei", "delegate"),
+    "grace": ("auditor-grace-hopper", "Grace Hopper", "auditor"),
+    "ada": ("admin-ada-lovelace", "Ada Lovelace", "administrator"),
+}
+
+
+def wire_staff(app, recorder, clock) -> SimpleNamespace:
+    """Register the staff blueprint with test dependencies."""
+
+    authenticator = StaffAuthenticator(
+        db_session=lambda: db.session,
+        rate_limiter=LoginRateLimiter(clock=clock),
+        audit=recorder,
+    )
+    sessions = StaffSessions(audit=recorder, clock=clock)
+
+    app.register_blueprint(create_staff_blueprint(
+        authenticator=authenticator, sessions=sessions,
+    ))
+
+    return SimpleNamespace(authenticator=authenticator, sessions=sessions)
+
+
+@contextmanager
+def staff_environment():
+    """App, client, audit recorder, clock and one account per role."""
+
+    now = [START_TIME]
+    recorder = AuditRecorder()
+    app = base_app()
+    services = wire_staff(app, recorder, lambda: now[0])
+    pems = {}
+
+    with app.app_context():
+        db.create_all()
+
+        for name, (staff_id, full_name, role) in PEOPLE.items():
+            pems[name], fingerprint = make_certificate(full_name)
+            create_staff_account(
+                db.session, staff_id=staff_id, full_name=full_name,
+                role=role, password=PASSWORD, cert_fingerprint=fingerprint,
+            )
+
+        db.session.commit()
+        db.session.remove()
+
+    # Requests run without a shared app context, so each one
+    # gets its own `g` (as in production).
+    with app.test_client() as client:
+        yield SimpleNamespace(
+            app=app, client=client, audit=recorder, clock=now,
+            pems=pems, services=services,
+        )
+
+    with app.app_context():
+        db.drop_all()
+
+
+def login_as(env, name, password=PASSWORD, pem="own", **kwargs):
+    if pem == "own":
+        pem = env.pems[name]
+
+    return staff_request(
+        env.client, "post", "/staff/login",
+        {"staff_id": PEOPLE[name][0], "password": password},
+        pem=pem, **kwargs,
     )

@@ -8,64 +8,32 @@ throwaway ones generated in memory.
 
 import pytest
 
-from admin import create_staff_account, find_staff_account
-from admin.login import StaffAuthenticator
-from admin.routes import create_staff_blueprint
+from admin import find_staff_account
 from crypto_agility.passwords import Argon2idAlgorithm, Argon2Parameters
-from rate_limit import LoginRateLimiter
 from records import db
 from staff_support import (
-    AuditRecorder,
-    base_app,
+    PASSWORD,
     csrf_headers,
     make_certificate,
+    staff_environment,
     staff_request,
 )
 
 
-PASSWORD = "Staff-Password-2026!"
 GENERIC_401 = {"error": "Invalid authentication credentials"}
 
 
 @pytest.fixture
 def env():
-    now = [1700000000.0]
-    recorder = AuditRecorder()
-    app = base_app()
-
-    authenticator = StaffAuthenticator(
-        db_session=lambda: db.session,
-        rate_limiter=LoginRateLimiter(clock=lambda: now[0]),
-        audit=recorder,
-    )
-    app.register_blueprint(
-        create_staff_blueprint(authenticator=authenticator)
-    )
-
-    jane_pem, jane_fp = make_certificate("Jane Citizen")
-    li_pem, li_fp = make_certificate("Li Wei")
-
-    with app.app_context():
-        db.create_all()
-        create_staff_account(
-            db.session, staff_id="officer-jane-citizen",
-            full_name="Jane Citizen", role="officer",
-            password=PASSWORD, cert_fingerprint=jane_fp,
-        )
-        create_staff_account(
-            db.session, staff_id="delegate-li-wei", full_name="Li Wei",
-            role="delegate", password=PASSWORD, cert_fingerprint=li_fp,
-        )
-        db.session.commit()
-
-        with app.test_client() as client:
-            yield {
-                "client": client, "audit": recorder, "clock": now,
-                "jane_pem": jane_pem, "li_pem": li_pem,
-            }
-
-        db.session.remove()
-        db.drop_all()
+    with staff_environment() as environment:
+        yield {
+            "client": environment.client,
+            "audit": environment.audit,
+            "clock": environment.clock,
+            "app": environment.app,
+            "jane_pem": environment.pems["jane"],
+            "li_pem": environment.pems["li"],
+        }
 
 
 def login(env, staff_id="officer-jane-citizen", password=PASSWORD,
@@ -243,8 +211,9 @@ def test_failure_reasons_are_audited(env, kwargs, reason):
 
 # Test 16: Deactivated accounts cannot log in
 def test_inactive_account_is_rejected(env):
-    find_staff_account(db.session, "officer-jane-citizen").is_active = False
-    db.session.commit()
+    with env["app"].app_context():
+        find_staff_account(db.session, "officer-jane-citizen").is_active = False
+        db.session.commit()
 
     assert login(env).status_code == 401
     assert env["audit"].events[-1]["details"] == {
@@ -258,13 +227,16 @@ def test_outdated_password_hash_is_upgraded(env):
         "argon2id-test-weak",
         Argon2Parameters(time_cost=1, memory_cost_kib=8192, parallelism=1),
     )
-    account = find_staff_account(db.session, "officer-jane-citizen")
-    account.password_hash = weak.hash(PASSWORD)
-    db.session.commit()
+    with env["app"].app_context():
+        account = find_staff_account(db.session, "officer-jane-citizen")
+        account.password_hash = weak.hash(PASSWORD)
+        db.session.commit()
 
     assert login(env).status_code == 200
 
-    db.session.expire_all()
-    upgraded = find_staff_account(db.session, "officer-jane-citizen")
+    with env["app"].app_context():
+        upgraded = find_staff_account(db.session, "officer-jane-citizen")
 
-    assert upgraded.password_hash.startswith("$argon2id$v=19$m=65536,t=3,p=4$")
+        assert upgraded.password_hash.startswith(
+            "$argon2id$v=19$m=65536,t=3,p=4$"
+        )

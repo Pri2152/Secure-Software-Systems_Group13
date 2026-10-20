@@ -12,15 +12,18 @@ Security controls:
   failure; 429 when the SR-01 rate limit applies
 - CSRF protection from Flask-WTF (app-wide), with a
   token endpoint like Workstream A's /login/csrf
+- Successful login replaces any existing (voter or
+  staff) session with a fresh staff session
 
 Local academic prototype.
 """
 
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, jsonify, request
 from flask_wtf.csrf import generate_csrf
 
 from .gateway import read_gateway_identity
 from .login import STATUS_RATE_LIMITED, StaffAuthenticator
+from .sessions import StaffSessions
 
 
 LOGIN_FIELDS = frozenset({"staff_id", "password"})
@@ -58,17 +61,13 @@ def valid_password_input(password) -> bool:
     return isinstance(password, str) and 1 <= len(password) <= MAX_PASSWORD_INPUT
 
 
-def establish_staff_session(account) -> None:
-    """Fresh session holding only the keys SR-04 RBAC reads."""
-
-    session.clear()
-    session["staff_authenticated"] = True
-    session["staff_id"] = account.staff_id
-    session["role"] = account.role
-
-
-def create_staff_blueprint(*, authenticator: StaffAuthenticator) -> Blueprint:
+def create_staff_blueprint(
+    *,
+    authenticator: StaffAuthenticator,
+    sessions: StaffSessions,
+) -> Blueprint:
     blueprint = Blueprint("staff", __name__)
+    require_staff_session = sessions.require_staff_session
 
     @blueprint.get("/staff/csrf")
     def staff_csrf():
@@ -98,11 +97,26 @@ def create_staff_blueprint(*, authenticator: StaffAuthenticator) -> Blueprint:
         if not result.success:
             return invalid_credentials()
 
-        establish_staff_session(result.account)
+        sessions.establish(result.account)
 
         return jsonify({
             "message": "Authentication successful",
             "role": result.account.role,
         }), 200
+
+    @blueprint.get("/staff/session")
+    @require_staff_session
+    def staff_session_status():
+        return jsonify({
+            "staff_id": sessions.current_staff_id(),
+            "csrf_token": generate_csrf(),
+        }), 200
+
+    @blueprint.post("/staff/logout")
+    @require_staff_session
+    def staff_logout():
+        sessions.end("STAFF_LOGOUT")
+
+        return jsonify({"message": "Logged out successfully"}), 200
 
     return blueprint
