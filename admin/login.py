@@ -84,7 +84,7 @@ class StaffAuthenticator:
         rate_limiter,
         audit: Callable,
     ):
-        self._db_session = db_session
+        self.db_session = db_session
         self.rate_limiter = rate_limiter
         self.audit = audit
 
@@ -126,7 +126,7 @@ class StaffAuthenticator:
             audit("RATE_LIMITED", "denied", None, {})
             return StaffLoginResult(False, STATUS_RATE_LIMITED)
 
-        account = find_staff_account(self._db_session(), normalized_id)
+        account = find_staff_account(self.db_session(), normalized_id)
 
         password_ok, new_hash = verify_and_upgrade(
             account.password_hash if account else _dummy_hash(),
@@ -148,7 +148,7 @@ class StaffAuthenticator:
 
         if new_hash is not None:
             account.password_hash = new_hash
-            self._db_session().commit()
+            self.db_session().commit()
 
         audit("SUCCESS", "success", account.staff_id, {"role": account.role})
 

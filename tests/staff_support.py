@@ -242,11 +242,14 @@ def wire_staff(app, recorder, clock) -> SimpleNamespace:
 
 
 @contextmanager
-def staff_environment():
-    """App, client, audit recorder, clock and one account per role."""
+def staff_environment(audit=None):
+    """
+    App, client, audit target, clock and one account per
+    role. audit defaults to an in-memory AuditRecorder.
+    """
 
     now = [START_TIME]
-    recorder = AuditRecorder()
+    recorder = audit or AuditRecorder()
     app = base_app()
     services = wire_staff(app, recorder, lambda: now[0])
     pems = {}
