@@ -9,6 +9,14 @@ Usage (handbook section 6.1):
     envelope = crypto.mac("audit", data)    # {"alg", "kid", "v", "sig"}
     envelope = crypto.sign("ballot", data)  # {"alg", "kid", "v", "sig"}
     ok = crypto.verify("ballot", data, envelope)
+    envelope = crypto.encrypt("pii", data)  # AES-256-GCM
+    data = crypto.decrypt("pii", envelope)  # DecryptionError on tamper
+    envelope = crypto.seal("election", data)
+    data = crypto.open("election", envelope)  # private side only
+
+The `crypto` object also satisfies Workstream E's
+platform_security.field_crypto provider interface
+(encrypt(purpose, bytes) / decrypt(purpose, dict)).
 
 Security controls:
 - Algorithm registry and secure factory: the crypto
@@ -148,6 +156,20 @@ class _ConfiguredCrypto:
 
     def public_key_pem(self, purpose: str) -> bytes:
         return get_service().public_key_pem(purpose)
+
+    def encrypt(
+        self, purpose: str, plaintext: bytes, aad: bytes = b""
+    ) -> dict:
+        return get_service().encrypt(purpose, plaintext, aad)
+
+    def decrypt(self, purpose: str, envelope, aad: bytes = b"") -> bytes:
+        return get_service().decrypt(purpose, envelope, aad)
+
+    def seal(self, purpose: str, plaintext: bytes) -> dict:
+        return get_service().seal(purpose, plaintext)
+
+    def open(self, purpose: str, envelope) -> bytes:
+        return get_service().open(purpose, envelope)
 
 
 crypto = _ConfiguredCrypto()

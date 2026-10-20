@@ -16,6 +16,13 @@ Security controls:
   types, format version, base64 and size caps
 - verify_* methods return False on any problem and
   never raise; constant-time comparisons only
+- Authenticated encryption (AES-256-GCM) with a random
+  nonce per message; the key ID is bound into the
+  associated data; decrypt/open raise DecryptionError
+  on any tampering, wrong key or bad envelope
+- Sealing (RSA-OAEP + AES-256-GCM) lets voter clients
+  encrypt with only the public "election" key; only
+  the compartment holding the private key can open
 
 Local academic prototype.
 """
@@ -24,8 +31,13 @@ import base64
 import binascii
 import hmac
 
-from .algorithms import HASH, MAC, SIGN, public_key_pem
-from .errors import CryptoError, InvalidEnvelope, KeyNotFound
+from .algorithms import AEAD, HASH, MAC, SEAL, SIGN, public_key_pem
+from .errors import (
+    CryptoError,
+    DecryptionError,
+    InvalidEnvelope,
+    KeyNotFound,
+)
 from .keys import KeyStore, check_purpose
 from .policy import CryptoPolicy
 from .registry import AlgorithmRegistry, CryptoFactory
@@ -38,6 +50,11 @@ MAX_ALG_LENGTH = 64
 MAX_KID_LENGTH = 128
 MAX_HASH_VALUE_LENGTH = 256
 MAX_TAG_B64_LENGTH = 4096
+MAX_PLAINTEXT_BYTES = 1024 * 1024
+MAX_CIPHERTEXT_B64_LENGTH = 2 * 1024 * 1024
+
+# The public seal key is published under this purpose
+ELECTION_PURPOSE = "election"
 
 VERIFY_FAILURES = (CryptoError, ValueError, TypeError)
 
@@ -61,6 +78,21 @@ def _require_bytes(data) -> bytes:
         raise TypeError("Data must be bytes")
 
     return data
+
+
+def _require_plaintext(plaintext) -> bytes:
+    _require_bytes(plaintext)
+
+    if len(plaintext) > MAX_PLAINTEXT_BYTES:
+        raise ValueError("Plaintext is too large")
+
+    return plaintext
+
+
+def _bound_aad(kid: str, aad: bytes) -> bytes:
+    """Associated data that also authenticates the key ID."""
+
+    return kid.encode("ascii") + b"\x00" + _require_bytes(aad)
 
 
 def parse_envelope(envelope, binary_fields: dict[str, int]) -> dict:
@@ -225,15 +257,117 @@ class CryptoService:
             return False
 
     def public_key_pem(self, purpose: str) -> bytes:
-        """PEM public key of the current signing key."""
+        """
+        PEM public key: the sealing key for "election",
+        otherwise the current signing key.
+        """
 
         check_purpose(purpose)
 
-        algorithm = self.factory.for_new(SIGN)
+        family = SEAL if purpose == ELECTION_PURPOSE else SIGN
+        algorithm = self.factory.for_new(family)
 
         return public_key_pem(
             self.keys.current(purpose, algorithm).material.public_key
         )
+
+    # Authenticated encryption
+
+    def encrypt(
+        self, purpose: str, plaintext: bytes, aad: bytes = b""
+    ) -> dict:
+        """AEAD envelope {"alg", "kid", "v", "nonce", "ct"}."""
+
+        check_purpose(purpose)
+        _require_plaintext(plaintext)
+
+        algorithm = self.factory.for_new(AEAD)
+        key = self.keys.current(purpose, algorithm)
+
+        nonce, ciphertext = algorithm.encrypt(
+            key.material.secret, plaintext, _bound_aad(key.kid, aad)
+        )
+
+        return self._envelope(
+            algorithm.name, key.kid, nonce=nonce, ct=ciphertext
+        )
+
+    def decrypt(self, purpose: str, envelope, aad: bytes = b"") -> bytes:
+        """Plaintext, or DecryptionError on any failure."""
+
+        try:
+            check_purpose(purpose)
+
+            fields = parse_envelope(envelope, {
+                "nonce": MAX_TAG_B64_LENGTH,
+                "ct": MAX_CIPHERTEXT_B64_LENGTH,
+            })
+            algorithm = self.factory.for_verify(AEAD, fields["alg"])
+            key = self.keys.get(fields["kid"], purpose, algorithm)
+
+            return algorithm.decrypt(
+                key.material.secret,
+                fields["nonce"],
+                fields["ct"],
+                _bound_aad(fields["kid"], aad),
+            )
+
+        except VERIFY_FAILURES:
+            raise DecryptionError("Decryption failed") from None
+
+    # Public-key sealing
+
+    def seal(self, purpose: str, plaintext: bytes) -> dict:
+        """
+        Envelope {"alg", "kid", "v", "wrapped_key",
+        "nonce", "ct"}; needs only the public key.
+        """
+
+        check_purpose(purpose)
+        _require_plaintext(plaintext)
+
+        algorithm = self.factory.for_new(SEAL)
+        key = self.keys.current(purpose, algorithm)
+
+        wrapped_key, nonce, ciphertext = algorithm.seal(
+            key.material.public_key, plaintext, key.kid.encode("ascii")
+        )
+
+        return self._envelope(
+            algorithm.name,
+            key.kid,
+            wrapped_key=wrapped_key,
+            nonce=nonce,
+            ct=ciphertext,
+        )
+
+    def open(self, purpose: str, envelope) -> bytes:
+        """Private-key side only. DecryptionError on any failure."""
+
+        try:
+            check_purpose(purpose)
+
+            fields = parse_envelope(envelope, {
+                "wrapped_key": MAX_TAG_B64_LENGTH,
+                "nonce": MAX_TAG_B64_LENGTH,
+                "ct": MAX_CIPHERTEXT_B64_LENGTH,
+            })
+            algorithm = self.factory.for_verify(SEAL, fields["alg"])
+            key = self.keys.get(fields["kid"], purpose, algorithm)
+
+            if key.material.private_key is None:
+                raise KeyNotFound("No private key for this purpose")
+
+            return algorithm.open(
+                key.material.private_key,
+                fields["wrapped_key"],
+                fields["nonce"],
+                fields["ct"],
+                fields["kid"].encode("ascii"),
+            )
+
+        except VERIFY_FAILURES:
+            raise DecryptionError("Decryption failed") from None
 
     @staticmethod
     def _envelope(alg: str, kid: str, **binary_fields: bytes) -> dict:
