@@ -15,12 +15,16 @@ Security controls:
 - Each new entry is HMAC-chained to the previous entry
   of its stream (see chain.py); if the MAC cannot be
   computed the event is not stored (fail closed)
+- Every CHECKPOINT_INTERVAL entries per stream a signed
+  checkpoint goes to the separate archive; a failed
+  checkpoint is reported, never silently ignored
 - Reading is a separate component used only by the
   auditor endpoints
 
 Local academic prototype.
 """
 
+import logging
 import threading
 
 from collections.abc import Callable
@@ -38,12 +42,23 @@ from .chain import (
     seal_entry,
     verify_entries,
 )
+from .checkpoints import (
+    CHECKPOINT_INTERVAL,
+    ArchiveNotConfigured,
+    CheckpointArchive,
+    CheckpointResult,
+    checkpoint_body,
+    sign_checkpoint,
+    verify_checkpoint_lines,
+)
 from .events import STREAMS, validate_event
 from .filters import sanitize_details
 from .models import AuditBase, AuditEntry, ensure_triggers
 
 
 MAX_READ_LIMIT = 200
+
+logger = logging.getLogger("evp.audit")
 
 
 def utc_now() -> datetime:
@@ -68,8 +83,10 @@ class AuditLog:
         *,
         crypto=None,
         clock: Callable[[], datetime] | None = None,
+        archive: CheckpointArchive | None = None,
     ):
         self.engine = engine
+        self.archive = archive
         self.crypto = default_crypto if crypto is None else crypto
         self.clock = clock or utc_now
         self._sessions = sessionmaker(bind=engine, expire_on_commit=False)
@@ -121,7 +138,69 @@ class AuditLog:
 
             db_session.add(entry)
 
+        if self.archive is not None and entry.seq % CHECKPOINT_INTERVAL == 0:
+            self._checkpoint_after_write(stream)
+
         return entry.seq
+
+    def checkpoint(self, stream: str) -> dict | None:
+        """
+        Sign the latest entry of a stream into the
+        archive. Returns the checkpoint, or None if the
+        stream is empty.
+        """
+
+        if stream not in STREAMS:
+            raise ValueError("Invalid audit stream")
+
+        if self.archive is None:
+            raise ArchiveNotConfigured("No checkpoint archive is configured")
+
+        with self._write_lock, self._sessions() as db_session:
+            latest = self._last_entry(db_session, stream)
+
+            if latest is None:
+                return None
+
+            checkpoint = sign_checkpoint(
+                checkpoint_body(
+                    stream,
+                    latest.seq,
+                    latest.entry_hash,
+                    format_timestamp(self.clock()),
+                ),
+                self.crypto,
+            )
+            self.archive.append(checkpoint)
+
+        return checkpoint
+
+    def verify_checkpoints(self) -> CheckpointResult:
+        """Check every archived checkpoint against the database."""
+
+        if self.archive is None:
+            raise ArchiveNotConfigured("No checkpoint archive is configured")
+
+        with self._sessions() as db_session:
+
+            def entry_hash_at(stream: str, seq: int) -> str | None:
+                return db_session.scalar(
+                    select(AuditEntry.entry_hash).where(
+                        AuditEntry.stream == stream, AuditEntry.seq == seq
+                    )
+                )
+
+            return verify_checkpoint_lines(
+                self.archive.lines(), self.crypto, entry_hash_at
+            )
+
+    def _checkpoint_after_write(self, stream: str) -> None:
+        # The entry is already stored; a checkpoint failure is
+        # reported for operators and shows up in verification.
+        try:
+            self.checkpoint(stream)
+        except Exception:
+            logger.error("audit_checkpoint_failed stream=%s", stream)
 
     def list_events(self, stream: str, limit: int = 50) -> list[dict]:
         """Most recent entries of one stream, newest first."""

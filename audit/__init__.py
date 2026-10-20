@@ -26,22 +26,35 @@ Security controls:
 - AuditLogHandler captures Workstream A's evp.* security
   log events as identity-stream audit events
   (install_audit_handler at application start-up)
+- Signed checkpoints every 50 entries per stream go to
+  a separate append-only archive (EVP_AUDIT_ARCHIVE)
 - Fails closed: if no audit database is configured,
   record_event raises AuditNotConfigured instead of
   silently dropping security events
 
 Configuration (environment):
 - EVP_AUDIT_DB_URL   SQLAlchemy URL of the audit database
+- EVP_AUDIT_ARCHIVE  checkpoint archive file (separate volume);
+                     without it, checkpoints are disabled and a
+                     warning is logged
 
 Local academic prototype.
 """
 
+import logging
 import os
 import threading
 
 from sqlalchemy import create_engine
 
 from .chain import ChainResult
+from .checkpoints import (
+    CHECKPOINT_INTERVAL,
+    ENV_AUDIT_ARCHIVE,
+    ArchiveNotConfigured,
+    CheckpointArchive,
+    CheckpointResult,
+)
 from .events import (
     STREAM_ADMIN,
     STREAM_BALLOT,
@@ -53,6 +66,8 @@ from .log import AuditLog
 
 
 ENV_AUDIT_DB_URL = "EVP_AUDIT_DB_URL"
+
+logger = logging.getLogger("evp.audit")
 
 
 class AuditNotConfigured(RuntimeError):
@@ -70,7 +85,15 @@ def build_audit_log_from_env(environ=None) -> AuditLog:
     if not url:
         raise AuditNotConfigured("No audit database is configured")
 
-    audit_log = AuditLog(create_engine(url))
+    archive_path = environ.get(ENV_AUDIT_ARCHIVE)
+
+    if not archive_path:
+        logger.warning("audit_checkpoint_archive_not_configured")
+
+    audit_log = AuditLog(
+        create_engine(url),
+        archive=CheckpointArchive(archive_path) if archive_path else None,
+    )
     audit_log.create_schema()
 
     return audit_log
