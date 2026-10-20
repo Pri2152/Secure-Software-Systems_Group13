@@ -20,6 +20,9 @@ Security controls:
 - Sensitive-data filter before storage (secure logger)
 - Three separate streams; the ballot stream never
   records who acted or from where (SR-08)
+- Per-stream HMAC hash chains via crypto_agility
+  (SR-14) make edits, deletions and reordering
+  detectable (AuditLog.verify_chain)
 - Fails closed: if no audit database is configured,
   record_event raises AuditNotConfigured instead of
   silently dropping security events
@@ -35,6 +38,7 @@ import threading
 
 from sqlalchemy import create_engine
 
+from .chain import ChainResult
 from .events import (
     STREAM_ADMIN,
     STREAM_BALLOT,
@@ -88,6 +92,10 @@ def get_audit_log() -> AuditLog:
             _audit_log = build_audit_log_from_env()
 
         return _audit_log
+
+
+def verify_chain(stream: str) -> ChainResult:
+    return get_audit_log().verify_chain(stream)
 
 
 def record_event(

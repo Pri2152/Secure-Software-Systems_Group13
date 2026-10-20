@@ -12,21 +12,32 @@ Security controls:
   callers cannot supply the timestamp
 - Insert-only access: this module never updates or
   deletes audit rows
+- Each new entry is HMAC-chained to the previous entry
+  of its stream (see chain.py); if the MAC cannot be
+  computed the event is not stored (fail closed)
 - Reading is a separate component used only by the
   auditor endpoints
 
 Local academic prototype.
 """
 
-import json
 import threading
 
 from collections.abc import Callable
 from datetime import datetime, timezone
 
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from crypto_agility import crypto as default_crypto
+
+from .chain import (
+    ChainResult,
+    canonical_json,
+    genesis_hash,
+    seal_entry,
+    verify_entries,
+)
 from .events import STREAMS, validate_event
 from .filters import sanitize_details
 from .models import AuditBase, AuditEntry
@@ -48,12 +59,6 @@ def format_timestamp(moment: datetime) -> str:
     return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
-def canonical_json(value) -> str:
-    return json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
-    )
-
-
 class AuditLog:
     """Writer and reader for the central audit table."""
 
@@ -61,9 +66,11 @@ class AuditLog:
         self,
         engine: Engine,
         *,
+        crypto=None,
         clock: Callable[[], datetime] | None = None,
     ):
         self.engine = engine
+        self.crypto = default_crypto if crypto is None else crypto
         self.clock = clock or utc_now
         self._sessions = sessionmaker(bind=engine, expire_on_commit=False)
         self._write_lock = threading.Lock()
@@ -81,8 +88,8 @@ class AuditLog:
         outcome: str,
         details: dict | None = None,
         source_ip: str | None = None,
-    ) -> None:
-        """Validate, filter and append one audit event."""
+    ) -> int:
+        """Validate, filter and append one event; returns its seq."""
 
         validate_event(
             event_type, stream, actor_type, actor_id, outcome, source_ip
@@ -91,9 +98,11 @@ class AuditLog:
         details_json = canonical_json(sanitize_details(details))
 
         with self._write_lock, self._sessions.begin() as db_session:
+            previous = self._last_entry(db_session, stream)
+
             entry = AuditEntry(
                 stream=stream,
-                seq=self._last_seq(db_session, stream) + 1,
+                seq=previous.seq + 1 if previous else 1,
                 timestamp_utc=format_timestamp(self.clock()),
                 event_type=event_type,
                 actor_type=actor_type,
@@ -103,7 +112,15 @@ class AuditLog:
                 details_json=details_json,
             )
 
+            seal_entry(
+                entry,
+                previous.entry_hash if previous else genesis_hash(stream),
+                self.crypto,
+            )
+
             db_session.add(entry)
+
+        return entry.seq
 
     def list_events(self, stream: str, limit: int = 50) -> list[dict]:
         """Most recent entries of one stream, newest first."""
@@ -128,10 +145,26 @@ class AuditLog:
 
         return [entry.to_public_dict() for entry in entries]
 
+    def verify_chain(self, stream: str) -> ChainResult:
+        """Check every link and MAC of one stream."""
+
+        if stream not in STREAMS:
+            raise ValueError("Invalid audit stream")
+
+        with self._sessions() as db_session:
+            entries = db_session.scalars(
+                select(AuditEntry)
+                .where(AuditEntry.stream == stream)
+                .order_by(AuditEntry.seq, AuditEntry.id)
+            ).all()
+
+        return verify_entries(stream, entries, self.crypto)
+
     @staticmethod
-    def _last_seq(db_session: Session, stream: str) -> int:
-        return db_session.scalar(
-            select(func.coalesce(func.max(AuditEntry.seq), 0)).where(
-                AuditEntry.stream == stream
-            )
-        )
+    def _last_entry(db_session: Session, stream: str) -> AuditEntry | None:
+        return db_session.scalars(
+            select(AuditEntry)
+            .where(AuditEntry.stream == stream)
+            .order_by(AuditEntry.seq.desc())
+            .limit(1)
+        ).first()

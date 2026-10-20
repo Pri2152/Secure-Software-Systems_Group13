@@ -46,8 +46,12 @@ class AuditEntry(AuditBase):
     source_ip: Mapped[str | None] = mapped_column(String(45))
     outcome: Mapped[str] = mapped_column(String(16), nullable=False)
     details_json: Mapped[str] = mapped_column(Text, nullable=False)
-    prev_hash: Mapped[str | None] = mapped_column(String(HASH_COLUMN_LENGTH))
-    entry_hash: Mapped[str | None] = mapped_column(String(HASH_COLUMN_LENGTH))
+    prev_hash: Mapped[str] = mapped_column(
+        String(HASH_COLUMN_LENGTH), nullable=False
+    )
+    entry_hash: Mapped[str] = mapped_column(
+        String(HASH_COLUMN_LENGTH), nullable=False
+    )
 
     def to_public_dict(self) -> dict:
         """Fields an auditor may see (no chain internals)."""

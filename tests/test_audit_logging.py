@@ -14,12 +14,21 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 
 import audit
+import crypto_agility
 from audit import AuditNotConfigured, record_event
 from audit.filters import MAX_DETAILS_BYTES, REDACTED, sanitize_details
 from audit.log import AuditLog
+from crypto_agility import CryptoService, DEFAULT_POLICY, default_registry
+from crypto_agility.keys import KeyStore
 
 
 START = datetime(2026, 10, 20, 9, 0, 0, tzinfo=timezone.utc)
+
+
+def new_crypto():
+    return CryptoService(
+        default_registry(), DEFAULT_POLICY, KeyStore.ephemeral()
+    )
 
 
 def memory_engine():
@@ -43,7 +52,7 @@ def clock():
 
 @pytest.fixture
 def audit_log(clock):
-    log = AuditLog(memory_engine(), clock=clock)
+    log = AuditLog(memory_engine(), crypto=new_crypto(), clock=clock)
     log.create_schema()
 
     return log
@@ -207,7 +216,11 @@ def test_details_are_normalised():
 
 # Test 10: Naive clock values are refused (UTC is mandatory)
 def test_naive_clock_is_refused():
-    log = AuditLog(memory_engine(), clock=lambda: datetime(2026, 1, 1))
+    log = AuditLog(
+        memory_engine(),
+        crypto=new_crypto(),
+        clock=lambda: datetime(2026, 1, 1),
+    )
     log.create_schema()
 
     with pytest.raises(ValueError):
@@ -266,6 +279,7 @@ def test_env_database_url_configures_audit(monkeypatch, tmp_path):
         "EVP_AUDIT_DB_URL", f"sqlite:///{tmp_path / 'audit.db'}"
     )
     audit.configure(None)
+    crypto_agility.configure(new_crypto())
 
     try:
         record_event("CONFIG_CHANGED", stream="admin",
@@ -278,3 +292,4 @@ def test_env_database_url_configures_audit(monkeypatch, tmp_path):
     finally:
         audit.get_audit_log().engine.dispose()
         audit.configure(None)
+        crypto_agility.configure(None)
