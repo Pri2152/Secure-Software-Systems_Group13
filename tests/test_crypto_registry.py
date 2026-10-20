@@ -140,10 +140,12 @@ def test_unknown_family_is_rejected():
 
 # Test 14: Family with no default cannot produce new outputs
 def test_missing_default_refuses_new_outputs(registry):
-    factory = CryptoFactory(registry, DEFAULT_POLICY)
+    policy = CryptoPolicy(defaults={}, allowed={HASH: {"sha256"}})
+
+    factory = CryptoFactory(registry, policy)
 
     with pytest.raises(AlgorithmNotAllowed):
-        factory.for_new(MAC)
+        factory.for_new(HASH)
 
 
 # Test 15: Family with no allow-list denies verification

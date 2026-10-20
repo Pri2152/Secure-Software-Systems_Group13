@@ -17,8 +17,11 @@ Local academic prototype.
 """
 
 import hashlib
+import hmac
+import os
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from .errors import AlgorithmUnavailable
 
@@ -32,6 +35,23 @@ SEAL = "seal"
 PASSWORD = "password"
 
 FAMILIES = frozenset({HASH, MAC, SIGN, AEAD, SEAL, PASSWORD})
+
+SYMMETRIC_KEY_BYTES = 32
+
+
+@dataclass(frozen=True, repr=False)
+class KeyMaterial:
+    """
+    Secret or asymmetric key material for one key
+    version. Its repr never shows the key.
+    """
+
+    secret: bytes | None = None
+    private_key: object = None
+    public_key: object = None
+
+    def __repr__(self) -> str:
+        return "<KeyMaterial redacted>"
 
 
 class Algorithm:
@@ -81,5 +101,38 @@ class HashAlgorithm(Algorithm):
         return self._hash_constructor(data).digest()
 
 
+class HmacAlgorithm(Algorithm):
+    """A keyed message authentication code (HMAC)."""
+
+    def __init__(
+        self,
+        name: str,
+        hash_constructor: Callable,
+        key_size: int = SYMMETRIC_KEY_BYTES,
+    ):
+        super().__init__(name, MAC)
+        self._hash_constructor = hash_constructor
+        self.key_size = key_size
+
+    def generate_key(self) -> KeyMaterial:
+        return KeyMaterial(secret=os.urandom(self.key_size))
+
+    def check_key(self, material: KeyMaterial) -> None:
+        if (
+            not isinstance(material.secret, bytes)
+            or len(material.secret) != self.key_size
+        ):
+            raise ValueError("Invalid MAC key")
+
+    def compute(self, key: bytes, data: bytes) -> bytes:
+        return hmac.new(key, data, self._hash_constructor).digest()
+
+    def verify(self, key: bytes, data: bytes, tag: bytes) -> bool:
+        return hmac.compare_digest(self.compute(key, data), tag)
+
+
 SHA256 = HashAlgorithm("sha256", hashlib.sha256)
 SHA3_256 = HashAlgorithm("sha3-256", hashlib.sha3_256)
+
+HMAC_SHA256 = HmacAlgorithm("hmac-sha256", hashlib.sha256)
+HMAC_SHA3_256 = HmacAlgorithm("hmac-sha3-256", hashlib.sha3_256)

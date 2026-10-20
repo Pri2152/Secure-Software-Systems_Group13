@@ -75,6 +75,8 @@ def default_registry() -> AlgorithmRegistry:
     return AlgorithmRegistry([
         algorithms.SHA256,
         algorithms.SHA3_256,
+        algorithms.HMAC_SHA256,
+        algorithms.HMAC_SHA3_256,
     ])
 
 
