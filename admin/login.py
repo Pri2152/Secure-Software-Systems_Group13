@@ -43,6 +43,9 @@ STATUS_RATE_LIMITED = "rate_limited"
 AUDIT_STREAM = "admin"
 AUDIT_ACTOR = "staff"
 
+LOGIN_EVENT_PREFIX = "STAFF_LOGIN"
+STEP_UP_EVENT_PREFIX = "STAFF_STEP_UP"
+
 
 @dataclass(frozen=True)
 class StaffLoginResult:
@@ -90,22 +93,37 @@ class StaffAuthenticator:
         staff_id,
         password,
         identity: GatewayIdentity | None,
+        *,
+        event_prefix: str = LOGIN_EVENT_PREFIX,
     ) -> StaffLoginResult:
+        """
+        Check both factors. event_prefix names the audit
+        events (STAFF_LOGIN_* or STAFF_STEP_UP_*).
+        """
+
+        def audit(suffix, outcome, actor_id, details):
+            self.audit(
+                f"{event_prefix}_{suffix}",
+                stream=AUDIT_STREAM,
+                actor_type=AUDIT_ACTOR,
+                actor_id=actor_id,
+                outcome=outcome,
+                details=details,
+                source_ip=identity.source_ip if identity else None,
+            )
 
         if identity is None:
-            self._audit_failure(None, None, "untrusted_gateway")
+            audit("FAILURE", "failure", None, {"reason": "untrusted_gateway"})
             return StaffLoginResult(False, STATUS_INVALID)
 
         normalized_id = normalize_staff_id(staff_id)
 
         if normalized_id is None:
-            self._audit_failure(None, identity, "invalid_staff_id")
+            audit("FAILURE", "failure", None, {"reason": "invalid_staff_id"})
             return StaffLoginResult(False, STATUS_INVALID)
 
         if self.rate_limiter.is_blocked(normalized_id, identity.source_ip):
-            self._audit(
-                "STAFF_LOGIN_RATE_LIMITED", "denied", None, identity, {}
-            )
+            audit("RATE_LIMITED", "denied", None, {})
             return StaffLoginResult(False, STATUS_RATE_LIMITED)
 
         account = find_staff_account(self._db_session(), normalized_id)
@@ -121,17 +139,18 @@ class StaffAuthenticator:
             self.rate_limiter.record_failure(
                 normalized_id, identity.source_ip
             )
-            self._audit_failure(account, identity, reason)
+            audit(
+                "FAILURE", "failure",
+                account.staff_id if account else None,
+                {"reason": reason},
+            )
             return StaffLoginResult(False, STATUS_INVALID)
 
         if new_hash is not None:
             account.password_hash = new_hash
             self._db_session().commit()
 
-        self._audit(
-            "STAFF_LOGIN_SUCCESS", "success", account.staff_id, identity,
-            {"role": account.role},
-        )
+        audit("SUCCESS", "success", account.staff_id, {"role": account.role})
 
         return StaffLoginResult(True, STATUS_AUTHENTICATED, account)
 
@@ -153,23 +172,3 @@ class StaffAuthenticator:
             return "wrong_password"
 
         return None
-
-    def _audit_failure(self, account, identity, reason: str) -> None:
-        self._audit(
-            "STAFF_LOGIN_FAILURE",
-            "failure",
-            account.staff_id if account else None,
-            identity,
-            {"reason": reason},
-        )
-
-    def _audit(self, event_type, outcome, actor_id, identity, details):
-        self.audit(
-            event_type,
-            stream=AUDIT_STREAM,
-            actor_type=AUDIT_ACTOR,
-            actor_id=actor_id,
-            outcome=outcome,
-            details=details,
-            source_ip=identity.source_ip if identity else None,
-        )

@@ -10,9 +10,10 @@ Security controls:
 - 10-minute inactivity timeout, as for voters (SR-16)
 - A voter session, or a session with both voter and
   staff flags, can never use staff endpoints
-- Ending a session (logout or idle expiry) runs the
-  registered clean-up hooks (e.g. revoke elevations)
-  and is audited on the admin stream
+- Starting or ending a session (login, logout, idle
+  expiry) runs the registered reset hooks, so a new
+  session never inherits privileges (e.g. elevations);
+  ending a session is audited on the admin stream
 
 Local academic prototype.
 """
@@ -62,14 +63,20 @@ class StaffSessions:
     ):
         self.audit = audit
         self.clock = clock
-        self._end_hooks: list[Callable[[str], None]] = []
+        self._reset_hooks: list[Callable[[str], None]] = []
 
-    def on_end(self, hook: Callable[[str], None]) -> None:
-        """Run hook(staff_id) whenever a staff session ends."""
+    def add_reset_hook(self, hook: Callable[[str], None]) -> None:
+        """Run hook(staff_id) whenever a staff session starts or ends."""
 
-        self._end_hooks.append(hook)
+        self._reset_hooks.append(hook)
+
+    def _reset(self, staff_id: str) -> None:
+        for hook in self._reset_hooks:
+            hook(staff_id)
 
     def establish(self, account) -> None:
+        self._reset(account.staff_id)
+
         session.clear()
         session[STAFF_FLAG] = True
         session["staff_id"] = account.staff_id
@@ -102,8 +109,7 @@ class StaffSessions:
         staff_id = session.get("staff_id")
 
         if isinstance(staff_id, str) and staff_id:
-            for hook in self._end_hooks:
-                hook(staff_id)
+            self._reset(staff_id)
 
             self.audit(
                 event_type,

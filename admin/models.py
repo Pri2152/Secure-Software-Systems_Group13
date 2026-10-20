@@ -10,6 +10,8 @@ Security controls:
   certificate cannot be shared between accounts
 - Passwords stored only as Argon2id hashes
   (crypto_agility.passwords, SR-14)
+- Elevation grants are stored server-side with an
+  expiry, so a client cannot create or extend one
 - Lives on the identity (default) database with the
   other identity records, never on the ballot bind
 
@@ -24,6 +26,7 @@ FULL_NAME_MAX_LENGTH = 128
 ROLE_MAX_LENGTH = 32
 FINGERPRINT_LENGTH = 64
 PASSWORD_HASH_MAX_LENGTH = 255
+PERMISSION_MAX_LENGTH = 64
 
 
 class StaffAccount(db.Model):
@@ -63,3 +66,32 @@ class StaffAccount(db.Model):
         nullable=False,
         default=True,
     )
+
+
+class ElevationGrant(db.Model):
+    """One time-boxed privileged permission for one person."""
+
+    __tablename__ = "staff_elevation_grants"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    staff_id = db.Column(
+        db.String(STAFF_ID_MAX_LENGTH),
+        db.ForeignKey("staff_accounts.staff_id"),
+        nullable=False,
+        index=True,
+    )
+
+    permission = db.Column(
+        db.String(PERMISSION_MAX_LENGTH),
+        nullable=False,
+    )
+
+    granted_at = db.Column(db.Float, nullable=False)
+    expires_at = db.Column(db.Float, nullable=False)
+
+    revoked = db.Column(db.Boolean, nullable=False, default=False)
+    revoked_at = db.Column(db.Float)
+
+    # Set once the expiry has been written to the audit log
+    expiry_recorded = db.Column(db.Boolean, nullable=False, default=False)

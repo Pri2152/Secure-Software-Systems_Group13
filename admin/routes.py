@@ -14,19 +14,30 @@ Security controls:
   token endpoint like Workstream A's /login/csrf
 - Successful login replaces any existing (voter or
   staff) session with a fresh staff session
+- Elevation needs a staff session, a permission the
+  role holds (403 otherwise) and step-up
+  re-authentication with the certificate and password
+  (401 / 429 as for login)
 
 Local academic prototype.
 """
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, session
 from flask_wtf.csrf import generate_csrf
 
+from .elevation import ElevationService, valid_permission_name
 from .gateway import read_gateway_identity
-from .login import STATUS_RATE_LIMITED, StaffAuthenticator
+from .login import (
+    STATUS_RATE_LIMITED,
+    STEP_UP_EVENT_PREFIX,
+    StaffAuthenticator,
+)
 from .sessions import StaffSessions
 
 
 LOGIN_FIELDS = frozenset({"staff_id", "password"})
+ELEVATE_FIELDS = frozenset({"permission", "password"})
+REVOKE_FIELDS = frozenset({"permission"})
 MAX_STAFF_ID_INPUT = 64
 MAX_PASSWORD_INPUT = 1024
 
@@ -65,6 +76,7 @@ def create_staff_blueprint(
     *,
     authenticator: StaffAuthenticator,
     sessions: StaffSessions,
+    elevation: ElevationService,
 ) -> Blueprint:
     blueprint = Blueprint("staff", __name__)
     require_staff_session = sessions.require_staff_session
@@ -107,10 +119,77 @@ def create_staff_blueprint(
     @blueprint.get("/staff/session")
     @require_staff_session
     def staff_session_status():
+        staff_id = sessions.current_staff_id()
+
         return jsonify({
-            "staff_id": sessions.current_staff_id(),
+            "staff_id": staff_id,
+            "elevations": elevation.active_permissions(staff_id),
             "csrf_token": generate_csrf(),
         }), 200
+
+    @blueprint.post("/staff/elevate")
+    @require_staff_session
+    def staff_elevate():
+        data = read_json_fields(ELEVATE_FIELDS, ELEVATE_FIELDS)
+
+        if (
+            data is None
+            or not valid_permission_name(data["permission"])
+            or not valid_password_input(data["password"])
+        ):
+            return _error("Invalid request", 400)
+
+        staff_id = session["staff_id"]
+        permission = data["permission"]
+
+        if not elevation.role_allows(session["role"], permission):
+            elevation.audit(
+                "STAFF_ELEVATION_DENIED",
+                stream="admin",
+                actor_type="staff",
+                actor_id=staff_id,
+                outcome="denied",
+                details={"permission": permission},
+            )
+            return _error("Forbidden", 403)
+
+        result = authenticator.authenticate(
+            staff_id,
+            data["password"],
+            read_gateway_identity(request),
+            event_prefix=STEP_UP_EVENT_PREFIX,
+        )
+
+        if result.status == STATUS_RATE_LIMITED:
+            return _error("Too many authentication attempts", 429)
+
+        if not result.success or result.account.staff_id != staff_id:
+            return invalid_credentials()
+
+        grant = elevation.grant(staff_id, permission)
+
+        return jsonify({
+            "permission": permission,
+            "expires_at": grant.expires_at,
+            "expires_in_seconds": grant.expires_at - grant.granted_at,
+        }), 200
+
+    @blueprint.post("/staff/elevate/revoke")
+    @require_staff_session
+    def staff_revoke_elevation():
+        data = read_json_fields(REVOKE_FIELDS, frozenset())
+
+        if data is None:
+            return _error("Invalid request", 400)
+
+        permission = data.get("permission")
+
+        if permission is not None and not valid_permission_name(permission):
+            return _error("Invalid request", 400)
+
+        revoked = elevation.revoke(session["staff_id"], permission)
+
+        return jsonify({"revoked": revoked}), 200
 
     @blueprint.post("/staff/logout")
     @require_staff_session

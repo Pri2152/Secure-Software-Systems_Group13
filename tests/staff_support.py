@@ -8,6 +8,7 @@ memory with `cryptography`; nothing is written to disk.
 import datetime
 
 from contextlib import contextmanager
+from functools import wraps
 from datetime import timedelta
 from types import SimpleNamespace
 from urllib.parse import quote
@@ -17,11 +18,12 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
-from flask import Flask
+from flask import Flask, jsonify, session
 from flask_session import Session
 from flask_wtf.csrf import CSRFProtect
 
 from admin import create_staff_account
+from admin.elevation import ElevationService
 from admin.login import StaffAuthenticator
 from admin.routes import create_staff_blueprint
 from admin.sessions import StaffSessions
@@ -174,6 +176,44 @@ PEOPLE = {
 }
 
 
+def stand_in_has_permission(role, permission):
+    return permission in STAFF_ROLE_PERMISSIONS.get(role, set())
+
+
+def stand_in_require_permission(permission):
+    """Same 401/403 behaviour as Workstream E's require_permission."""
+
+    def decorator(view):
+        @wraps(view)
+        def wrapper(*args, **kwargs):
+            if session.get("staff_authenticated") is not True:
+                return jsonify({"error": "Authentication required"}), 401
+
+            if "authenticated" in session or not stand_in_has_permission(
+                session.get("role"), permission
+            ):
+                return jsonify({"error": "Forbidden"}), 403
+
+            return view(*args, **kwargs)
+
+        wrapper.required_permission = permission
+
+        return wrapper
+
+    return decorator
+
+
+def rbac_functions():
+    """Workstream E's SR-04 functions when available, else stand-ins."""
+
+    try:
+        from platform_security.rbac import has_permission, require_permission
+    except ImportError:
+        return stand_in_require_permission, stand_in_has_permission
+
+    return require_permission, has_permission
+
+
 def wire_staff(app, recorder, clock) -> SimpleNamespace:
     """Register the staff blueprint with test dependencies."""
 
@@ -183,12 +223,22 @@ def wire_staff(app, recorder, clock) -> SimpleNamespace:
         audit=recorder,
     )
     sessions = StaffSessions(audit=recorder, clock=clock)
+    require_permission, has_permission = rbac_functions()
+    elevation = ElevationService(
+        db_session=lambda: db.session,
+        sessions=sessions,
+        require_permission=require_permission,
+        has_permission=has_permission,
+        audit=recorder,
+    )
 
     app.register_blueprint(create_staff_blueprint(
-        authenticator=authenticator, sessions=sessions,
+        authenticator=authenticator, sessions=sessions, elevation=elevation,
     ))
 
-    return SimpleNamespace(authenticator=authenticator, sessions=sessions)
+    return SimpleNamespace(
+        authenticator=authenticator, sessions=sessions, elevation=elevation,
+    )
 
 
 @contextmanager
