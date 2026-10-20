@@ -23,6 +23,9 @@ Security controls:
 - Per-stream HMAC hash chains via crypto_agility
   (SR-14) make edits, deletions and reordering
   detectable (AuditLog.verify_chain)
+- AuditLogHandler captures Workstream A's evp.* security
+  log events as identity-stream audit events
+  (install_audit_handler at application start-up)
 - Fails closed: if no audit database is configured,
   record_event raises AuditNotConfigured instead of
   silently dropping security events
@@ -45,6 +48,7 @@ from .events import (
     STREAM_IDENTITY,
     STREAMS,
 )
+from .handler import AuditLogHandler, install_audit_handler
 from .log import AuditLog
 
 
