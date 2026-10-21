@@ -249,14 +249,44 @@ services:
       timeout: 5s
       retries: 5
 
-  # SR-19 placeholder: scheduled 15-minute backups arrive later.
-  # For now it prints a notice and exits.
+  # SR-19: backups every 15 minutes (RPO <= 15 min) into the separate
+  # "backups" volume, keeping the newest 96 (24 hours). The loop is
+  # deploy/scripts/backup.sh; restore with deploy/scripts/restore.sh.
   backup:
     image: mysql:8.4.11
-    restart: "no"
-    command: ["sh", "-c", "echo 'SR-19 backup service not implemented yet'"]
+    restart: unless-stopped
+    entrypoint: ["bash", "/usr/local/bin/evp-backup.sh"]
+    environment:
+      BACKUP_INTERVAL_SECONDS: "900"
+      BACKUP_KEEP: "96"
+    secrets:
+      - db_identity_root_password
+      - db_ballot_root_password
+      - db_audit_root_password
     volumes:
+      - ./scripts/backup.sh:/usr/local/bin/evp-backup.sh:ro
       - backups:/backups
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      db-identity:
+        condition: service_healthy
+      db-ballot:
+        condition: service_healthy
+      db-audit:
+        condition: service_healthy
+    # Unhealthy when the newest backup is more than 30 minutes old.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "find /backups -mindepth 1 -maxdepth 1 -type d -name '*Z' -mmin -30 | grep -q ."]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
     networks:
       - identity_net
       - ballot_net

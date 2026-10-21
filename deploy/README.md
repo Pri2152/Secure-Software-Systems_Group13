@@ -63,6 +63,23 @@ Step 4 creates the identity and audit tables as root (from Workstream A's and B'
 
 A GRANT whose table does not exist yet (for example the ballot tables, which come with Workstream C) is skipped with a warning; re-run step 4 once the table exists. Re-run it after `make_secrets.sh --force` as well, so the database passwords match the new files.
 
+## Backup and restore drill
+
+The `backup` service dumps the identity, ballot and audit databases every 15 minutes (`mysqldump --single-transaction`) into the separate `backups` volume, one folder per UTC timestamp (for example `20261021T093000Z`), and keeps the newest 96 (24 hours). Target: lose at most 15 minutes of data (RPO) and be back within 2 hours (RTO).
+
+Run the drill from the repository root, with the stack up:
+
+1. Take a backup now (or wait for the next scheduled one):
+   `docker compose -f deploy/docker-compose.yml exec backup bash /usr/local/bin/evp-backup.sh --once`
+2. List the backups and pick a timestamp:
+   `docker compose -f deploy/docker-compose.yml run --rm --no-deps --entrypoint ls backup -1 /backups`
+3. Restore it:
+   `bash deploy/scripts/restore.sh 20261021T093000Z`
+
+`restore.sh` checks the backup files, stops the app services and the backup service, restores the three databases, starts the services again, and then checks the audit hash chain (Workstream B) and the ballot store (Workstream C's `verify_ballot_store`). A check that is not merged yet is reported with a warning. It prints the start time, end time and total duration; record them as the drill evidence. If anything fails, the app services stay stopped so nothing runs on a half-restored database.
+
+Database accounts and passwords live in MySQL's own system tables, not in these dumps. If a database volume itself was lost, run `bash deploy/scripts/apply_db_security.sh` after the restore. Keys are not in the backups either: back them up separately (see Key rotation).
+
 ## Key rotation
 
 Rotate the PII encryption key (SR-13) at least every 12 months, and at once if a key may have leaked.
