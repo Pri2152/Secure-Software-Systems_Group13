@@ -11,6 +11,7 @@ import ballot_credentials
 import ballot_service
 import crypto_agility
 from admin.candidates import add_draft_candidate
+from ballot_confirmation import is_confirmation_reference
 from ballot_credentials import CredentialError, accept_ballot_with_credential
 from ballot_models import AnonymousBallot, BallotCredential, VotingEligibility
 from records import db
@@ -53,7 +54,7 @@ def test_same_credential_race_accepts_exactly_one(contention_app, monkeypatch, r
 
     ready = Barrier(2, timeout=15)
     original = ballot_service.get_ballot_candidates
-    claims, deletions = [], []
+    claims, deletions, confirmations = [], [], []
     connections = set()
     lock = Lock()
 
@@ -77,9 +78,12 @@ def test_same_credential_race_accepts_exactly_one(contention_app, monkeypatch, r
     def attempt():
         with app.app_context():
             try:
-                accept_ballot_with_credential(
+                reference = accept_ballot_with_credential(
                     credential, candidate_id, PAYLOAD, clock=lambda: NOW
                 )
+                assert is_confirmation_reference(reference)
+                with lock:
+                    confirmations.append(reference)
                 return "accepted"
             except CredentialError as error:
                 return str(error)
@@ -93,6 +97,7 @@ def test_same_credential_race_accepts_exactly_one(contention_app, monkeypatch, r
         assert sorted(results) == ["Credential authorisation failed", "accepted"]
         assert sorted(claims) == [0, 1]
         assert deletions == [1]
+        assert len(confirmations) == 1
         assert len(connections) == 2
         with app.app_context():
             assert AnonymousBallot.query.count() == 1
