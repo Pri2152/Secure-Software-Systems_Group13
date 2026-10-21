@@ -8,8 +8,13 @@ import pytest
 
 from flask import Flask
 
-from ballot_models import VotingEligibility
+from ballot_models import (
+    AnonymousBallot,
+    VotingEligibility,
+)
 from ballot_service import (
+    BallotAcceptanceError,
+    accept_ballot,
     EligibilityError,
     get_ballot_candidates,
     get_voting_eligibility,
@@ -307,3 +312,191 @@ def test_invalid_identifiers_are_rejected(
             voter_id,
             election_id,
         )
+def test_anonymous_ballot_can_be_stored(db_app):
+    ballot = AnonymousBallot(
+        ballot_id="ballot-random-001",
+        election_id="election-2026",
+        electoral_division="Melbourne",
+        encrypted_ballot_json='{"alg":"aes-256-gcm","ct":"test"}',
+    )
+
+    db.session.add(ballot)
+    db.session.commit()
+
+    saved = AnonymousBallot.query.one()
+
+    assert saved.ballot_id == "ballot-random-001"
+    assert saved.election_id == "election-2026"
+    assert saved.electoral_division == "Melbourne"
+def test_anonymous_ballot_has_no_voter_identity_fields(db_app):
+    column_names = {
+        column.name
+        for column in AnonymousBallot.__table__.columns
+    }
+
+    assert "voter_id" not in column_names
+    assert "owner_voter_id" not in column_names
+    assert "source_ip" not in column_names
+    assert "state_code" not in column_names
+    assert "timestamp" not in column_names
+
+
+OPAQUE_BALLOT = '{"alg":"test","ct":"opaque"}'
+
+
+@pytest.fixture
+def acceptance_candidate(db_app):
+    add_eligibility()
+    candidates = add_candidates()
+    finalise_candidates()
+    return candidates[0].id
+
+
+def submit(candidate_id):
+    accept_ballot(
+        "voter-001", "election-2026", candidate_id, OPAQUE_BALLOT
+    )
+
+
+def assert_acceptance_state(voted, count):
+    db.session.remove()
+    assert VotingEligibility.query.one().has_voted is voted
+    assert AnonymousBallot.query.count() == count
+
+
+def test_acceptance_commits_ballot_and_status(acceptance_candidate):
+    submit(acceptance_candidate)
+    assert_acceptance_state(True, 1)
+    ballot = AnonymousBallot.query.one()
+    assert ballot.encrypted_ballot_json == OPAQUE_BALLOT
+    assert ballot.electoral_division == "Melbourne"
+    assert ballot.election_id == "election-2026"
+    assert len(bytes.fromhex(ballot.ballot_id)) == 32
+
+
+def test_repeated_acceptance_leaves_one_ballot(acceptance_candidate):
+    submit(acceptance_candidate)
+    with pytest.raises(BallotAcceptanceError, match="already accepted"):
+        submit(acceptance_candidate)
+    assert_acceptance_state(True, 1)
+
+
+def test_database_claim_rejects_stale_precheck(
+    acceptance_candidate, monkeypatch
+):
+    import ballot_service
+
+    stale_record = get_voting_eligibility("voter-001", "election-2026")
+    submit(acceptance_candidate)
+    # Simulate a request that passed its pre-check before the winner committed.
+    monkeypatch.setattr(
+        ballot_service, "get_voting_eligibility", lambda *args: stale_record
+    )
+    with pytest.raises(BallotAcceptanceError, match="already accepted"):
+        submit(acceptance_candidate)
+    assert_acceptance_state(True, 1)
+
+
+@pytest.mark.parametrize("candidate_id", [None, True, "1", 1.0, [], 0, -1, 99999])
+def test_acceptance_rejects_invalid_selection(
+    acceptance_candidate, candidate_id
+):
+    with pytest.raises(BallotAcceptanceError, match="Invalid candidate"):
+        submit(candidate_id)
+    assert_acceptance_state(False, 0)
+
+
+@pytest.mark.parametrize(
+    "payload", [None, {}, "", "  ", "x" * 65537],
+    ids=["none", "mapping", "empty", "whitespace", "oversized"],
+)
+def test_acceptance_rejects_invalid_payload(acceptance_candidate, payload):
+    with pytest.raises(BallotAcceptanceError, match="Invalid opaque"):
+        accept_ballot("voter-001", "election-2026", acceptance_candidate, payload)
+    assert_acceptance_state(False, 0)
+
+
+def test_acceptance_rejects_other_division(acceptance_candidate):
+    candidates = add_candidates(division="Sydney")
+    finalise_candidates("Sydney")
+    with pytest.raises(BallotAcceptanceError, match="Invalid candidate"):
+        submit(candidates[0].id)
+    assert_acceptance_state(False, 0)
+
+
+def test_acceptance_rejects_excluded_candidate(acceptance_candidate):
+    candidate = db.session.get(Candidate, acceptance_candidate)
+    candidate.status = "EXCLUDED"
+    db.session.commit()
+    with pytest.raises(BallotAcceptanceError, match="Invalid candidate"):
+        submit(acceptance_candidate)
+    assert_acceptance_state(False, 0)
+
+
+def test_acceptance_rejects_draft_list(db_app):
+    add_eligibility()
+    candidates = add_candidates()
+    with pytest.raises(BallotAcceptanceError, match="not final"):
+        submit(candidates[0].id)
+    assert_acceptance_state(False, 0)
+
+
+@pytest.mark.parametrize("change", ["removed", "suspended", "ineligible", "assignment"])
+def test_acceptance_enforces_eligibility(acceptance_candidate, change):
+    if change in {"removed", "suspended"}:
+        EnrolmentRecord.query.one().enrolment_status = change
+    elif change == "ineligible":
+        VotingEligibility.query.one().eligible = False
+    else:
+        VotingEligibility.query.one().state_code = "NSW"
+    db.session.commit()
+    with pytest.raises(BallotAcceptanceError):
+        submit(acceptance_candidate)
+    assert_acceptance_state(False, 0)
+
+
+def test_insert_failure_rolls_back_claim(acceptance_candidate):
+    from sqlalchemy import event
+    from sqlalchemy.exc import IntegrityError
+
+    claims_seen = []
+
+    def fail_insert(mapper, connection, target):
+        claims_seen.append(connection.execute(
+            db.select(VotingEligibility.has_voted)
+        ).scalar_one())
+        raise IntegrityError("synthetic insert failure", {}, Exception())
+
+    event.listen(AnonymousBallot, "before_insert", fail_insert)
+    try:
+        with pytest.raises(BallotAcceptanceError, match="acceptance failed"):
+            submit(acceptance_candidate)
+    finally:
+        event.remove(AnonymousBallot, "before_insert", fail_insert)
+    assert claims_seen == [True]
+    assert_acceptance_state(False, 0)
+    submit(acceptance_candidate)
+    assert_acceptance_state(True, 1)
+
+
+def test_commit_failure_rolls_back_flushed_ballot(
+    acceptance_candidate, monkeypatch
+):
+    from sqlalchemy.exc import OperationalError
+
+    session = db.session()
+    observed = []
+
+    def fail_commit():
+        session.flush()
+        observed.append((
+            session.execute(db.select(VotingEligibility.has_voted)).scalar_one(),
+            session.query(AnonymousBallot).count(),
+        ))
+        raise OperationalError("synthetic commit failure", {}, Exception())
+
+    monkeypatch.setattr(session, "commit", fail_commit)
+    with pytest.raises(BallotAcceptanceError, match="acceptance failed"):
+        submit(acceptance_candidate)
+    assert observed == [(True, 1)]
+    assert_acceptance_state(False, 0)

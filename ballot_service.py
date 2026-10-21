@@ -4,13 +4,16 @@ Workstream C ballot service.
 SR-03: Eligibility and single-vote enforcement
 """
 
-from sqlalchemy import select
+import secrets
+
+from sqlalchemy import select, update
+from sqlalchemy.exc import SQLAlchemyError
 
 from admin.candidates import (
     CandidateListNotFinal,
     final_candidate_list,
 )
-from ballot_models import VotingEligibility
+from ballot_models import AnonymousBallot, VotingEligibility
 from records import EnrolmentRecord, db
 
 
@@ -21,6 +24,10 @@ PROTOTYPE_DIVISION_STATES = {
 
 class EligibilityError(Exception):
     pass
+
+
+class BallotAcceptanceError(EligibilityError):
+    """The ballot could not be accepted safely."""
 
 
 def validate_ballot_assignment(eligibility_record):
@@ -110,3 +117,83 @@ def get_ballot_candidates(eligibility_record):
         raise EligibilityError(
             "Candidate list is not final"
         ) from exc
+
+
+def accept_ballot(
+    voter_id, election_id, candidate_id, encrypted_ballot_json
+):
+    """
+    Validate a single choice and atomically accept an opaque ballot.
+
+    voter_id must come from the authenticated server-side identity.
+    The caller supplies an opaque storage payload, not plaintext choices.
+    This SR-03 service does not encrypt or verify that payload (SR-10).
+    Owns commit/rollback of the current session; call without pending writes.
+    """
+
+    try:
+        if (
+            not isinstance(candidate_id, int)
+            or isinstance(candidate_id, bool)
+            or candidate_id <= 0
+        ):
+            raise BallotAcceptanceError("Invalid candidate selection")
+
+        if (
+            not isinstance(encrypted_ballot_json, str)
+            or not encrypted_ballot_json.strip()
+            or len(encrypted_ballot_json) > 65536
+        ):
+            raise BallotAcceptanceError("Invalid opaque ballot payload")
+
+        record = get_voting_eligibility(voter_id, election_id)
+        candidates = get_ballot_candidates(record)
+
+        if candidate_id not in {
+            candidate.candidate_id for candidate in candidates
+        }:
+            raise BallotAcceptanceError("Invalid candidate selection")
+
+        # Claim the eligibility row before storing the ballot.
+        claimed = db.session.execute(
+            update(VotingEligibility)
+            .where(
+                VotingEligibility.id == record.id,
+                VotingEligibility.voter_id == voter_id,
+                VotingEligibility.election_id == election_id,
+                VotingEligibility.eligible.is_(True),
+                VotingEligibility.has_voted.is_(False),
+                VotingEligibility.electoral_division
+                == record.electoral_division,
+                VotingEligibility.state_code == record.state_code,
+                select(EnrolmentRecord.id).where(
+                    EnrolmentRecord.owner_voter_id == voter_id,
+                    EnrolmentRecord.enrolment_status == "enrolled",
+                ).exists(),
+            )
+            .values(has_voted=True)
+            .execution_options(synchronize_session=False)
+        ).rowcount
+
+        if claimed != 1:
+            raise BallotAcceptanceError(
+                "Vote already accepted or eligibility changed"
+            )
+
+        db.session.add(AnonymousBallot(
+            ballot_id=secrets.token_hex(32),
+            election_id=election_id,
+            electoral_division=record.electoral_division,
+            encrypted_ballot_json=encrypted_ballot_json,
+        ))
+        db.session.commit()
+
+    except EligibilityError as error:
+        db.session.rollback()
+        raise BallotAcceptanceError(str(error)) from None
+    except SQLAlchemyError:
+        db.session.rollback()
+        raise BallotAcceptanceError("Ballot acceptance failed") from None
+    except Exception:
+        db.session.rollback()
+        raise
