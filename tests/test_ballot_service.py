@@ -11,10 +11,13 @@ from flask import Flask
 from ballot_models import VotingEligibility
 from ballot_service import (
     EligibilityError,
+    get_ballot_candidates,
     get_voting_eligibility,
     validate_ballot_assignment,
 )
 from records import EnrolmentRecord, db
+from admin.candidates import add_draft_candidate
+from admin.models import Candidate
 
 
 @pytest.fixture
@@ -80,6 +83,73 @@ def add_eligibility(
 
     return record
 
+def add_candidates(
+    division="Melbourne",
+    count=3,
+):
+    candidates = [
+        add_draft_candidate(
+            db.session,
+            division=division,
+            name=f"Candidate {chr(65 + i)}",
+            party="Independent",
+            position_in_group=i + 1,
+        )
+        for i in range(count)
+    ]
+
+    db.session.commit()
+
+    return candidates
+def finalise_candidates(
+    division="Melbourne",
+):
+    for candidate in db.session.query(
+        Candidate
+    ).filter_by(
+        division=division
+    ):
+        candidate.status = "FINAL"
+
+    db.session.commit()
+def test_ballot_uses_final_candidate_list(db_app):
+    record = add_eligibility()
+
+    add_candidates()
+    finalise_candidates()
+
+    candidates = get_ballot_candidates(record)
+
+    assert isinstance(candidates, tuple)
+    assert [
+        candidate.position_in_group
+        for candidate in candidates
+    ] == [1, 2, 3]
+def test_ballot_rejects_draft_candidate_list(db_app):
+    record = add_eligibility()
+
+    add_candidates()
+
+    with pytest.raises(
+        EligibilityError,
+        match="Candidate list is not final",
+    ):
+        get_ballot_candidates(record)
+def test_ballot_omits_excluded_candidate(db_app):
+    record = add_eligibility()
+
+    candidates = add_candidates()
+    finalise_candidates()
+
+    candidates[1].status = "EXCLUDED"
+    db.session.commit()
+
+    ballot_candidates = get_ballot_candidates(record)
+
+    assert [
+        candidate.position_in_group
+        for candidate in ballot_candidates
+    ] == [1, 3]
 
 def test_eligible_voter_is_returned(db_app):
     add_eligibility()
