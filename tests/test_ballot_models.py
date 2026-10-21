@@ -10,7 +10,10 @@ from flask import Flask
 from sqlalchemy.exc import IntegrityError
 
 from records import db
-from ballot_models import VotingEligibility
+from ballot_models import (
+    AnonymousBallot,
+    VotingEligibility,
+)
 
 
 @pytest.fixture
@@ -135,3 +138,31 @@ def test_different_voters_can_use_same_election(db_app):
     records = VotingEligibility.query.all()
 
     assert len(records) == 2
+
+
+def test_anonymous_ballot_can_be_stored(db_app):
+    ballot = AnonymousBallot(
+        ballot_id="ballot-random-001",
+        election_id="election-2026",
+        electoral_division="Melbourne",
+        encrypted_ballot_json='{"alg":"aes-256-gcm","ct":"test"}',
+    )
+    db.session.add(ballot)
+    db.session.commit()
+    saved = AnonymousBallot.query.one()
+    assert saved.ballot_id == "ballot-random-001"
+    assert saved.election_id == "election-2026"
+    assert saved.electoral_division == "Melbourne"
+
+
+def test_anonymous_ballot_has_no_voter_identity_fields(db_app):
+    column_names = {
+        column.name
+        for column in AnonymousBallot.__table__.columns
+    }
+
+    assert "voter_id" not in column_names
+    assert "owner_voter_id" not in column_names
+    assert "source_ip" not in column_names
+    assert "state_code" not in column_names
+    assert "timestamp" not in column_names

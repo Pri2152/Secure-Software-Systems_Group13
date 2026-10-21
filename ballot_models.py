@@ -66,3 +66,33 @@ class VotingEligibility(db.Model):
             name="uq_voter_election"
         ),
     )
+
+
+class AnonymousBallot(db.Model):
+    """
+    Stores an accepted ballot without voter identity.
+    """
+
+    __tablename__ = "anonymous_ballots"
+
+    ballot_id = db.Column(
+        db.String(64),
+        primary_key=True
+    )
+
+    election_id = db.Column(
+        db.String(64),
+        nullable=False,
+        index=True
+    )
+
+    electoral_division = db.Column(
+        db.String(128),
+        nullable=False,
+        index=True
+    )
+
+    encrypted_ballot_json = db.Column(
+        db.Text,
+        nullable=False
+    )
