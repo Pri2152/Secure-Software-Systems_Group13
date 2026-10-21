@@ -62,3 +62,17 @@ Step 4 creates the identity and audit tables as root (from Workstream A's and B'
 `admin-audit` restarts until step 4 has run, because its database accounts do not exist before that; it then starts on its own.
 
 A GRANT whose table does not exist yet (for example the ballot tables, which come with Workstream C) is skipped with a warning; re-run step 4 once the table exists. Re-run it after `make_secrets.sh --force` as well, so the database passwords match the new files.
+
+## Key rotation
+
+Rotate the PII encryption key (SR-13) at least every 12 months, and at once if a key may have leaked.
+
+1. Stop `voter-access-1`, `voter-access-2` and `admin-audit`.
+2. Check first with `--dry-run`, then rotate. The identity database URL is read from `EVP_IDENTITY_DB_URL`, never from the command line:
+   `python deploy/scripts/rotate_pii_key.py --generate-new-key --dry-run`
+   `python deploy/scripts/rotate_pii_key.py --generate-new-key`
+3. Mount the new key file (for example `pii_key_v2`) for the services in `docker-compose.yml`, next to `pii_key_v1`, then start them.
+
+The script lists the new key before changing any row and makes it current only after every row decrypts with it, so a failure leaves every row readable; run it again to continue. It never removes the old key: keep it until a backup taken after the rotation has been checked.
+
+Back up the keys in `deploy/secrets/keys/` separately from database backups, and never in the same place: a database backup together with its key is readable by anyone who gets both. Losing the keys means losing the encrypted data.
