@@ -11,7 +11,7 @@ from admin.candidates import (
     final_candidate_list,
 )
 from ballot_models import VotingEligibility
-from records import db
+from records import EnrolmentRecord, db
 
 
 class EligibilityError(Exception):
@@ -32,6 +32,17 @@ def get_voting_eligibility(voter_id, election_id):
         raise EligibilityError(
             "Invalid voter or election"
         )
+    enrolment_statement = select(EnrolmentRecord.id).where(
+        EnrolmentRecord.owner_voter_id == voter_id,
+        EnrolmentRecord.enrolment_status == "enrolled",
+    ).limit(1)
+
+    enrolled = db.session.execute(
+        enrolment_statement
+    ).scalar_one_or_none()
+
+    if enrolled is None:
+        raise EligibilityError("Voter is not enrolled")
 
     statement = select(VotingEligibility).where(
         VotingEligibility.voter_id == voter_id,
