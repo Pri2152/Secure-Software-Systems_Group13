@@ -26,6 +26,9 @@ def test_database_schema_has_no_identity_ballot_link(credential_app):
         "chain_index", "previous_hash", "record_hash"
     }
     assert schema.get_foreign_keys("anonymous_ballots") == []
+    assert {column["name"] for column in schema.get_columns("ballot_chain_state")} == {
+        "election_id", "electoral_division", "record_count", "head_hash", "checkpoint_json"
+    }
     assert {column["name"] for column in schema.get_columns("ballot_credentials")} == {
         "verifier", "voter_id", "election_id", "expires_at"
     }

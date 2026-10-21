@@ -12,8 +12,9 @@ import ballot_service
 import crypto_agility
 from admin.candidates import add_draft_candidate
 from ballot_confirmation import is_confirmation_reference
+from ballot_integrity import verify_ballot_chain
 from ballot_credentials import CredentialError, accept_ballot_with_credential
-from ballot_models import AnonymousBallot, BallotCredential, VotingEligibility
+from ballot_models import AnonymousBallot, BallotChainState, BallotCredential, VotingEligibility
 from records import db
 from test_ballot_credentials import NOW, issue, seed_voter
 from test_credential_acceptance import PAYLOAD
@@ -103,6 +104,8 @@ def test_same_credential_race_accepts_exactly_one(contention_app, monkeypatch, r
             assert AnonymousBallot.query.count() == 1
             assert VotingEligibility.query.one().has_voted is True
             assert BallotCredential.query.count() == 0
+            assert BallotChainState.query.one().record_count == 1
+            assert verify_ballot_chain("election-2026", "Melbourne") is True
             with pytest.raises(CredentialError):
                 accept_ballot_with_credential(
                     credential, candidate_id, PAYLOAD, clock=lambda: NOW
@@ -149,3 +152,41 @@ def test_concurrent_issuance_leaves_only_one_valid_credential(contention_app, mo
                     )
         accept_ballot_with_credential(valid[0], candidate_id, PAYLOAD, clock=lambda: NOW)
         assert AnonymousBallot.query.count() == 1
+
+
+@pytest.mark.parametrize("race", range(3))
+def test_two_eligible_voters_append_without_fork(contention_app, monkeypatch, race):
+    app, candidate_id, engine = contention_app
+    with app.app_context():
+        seed_voter("voter-002")
+        credentials = [issue(), issue("voter-002")]
+    ready = Barrier(2, timeout=15)
+    original = ballot_service.get_ballot_candidates
+
+    def synchronise(record):
+        candidates = original(record)
+        ready.wait()
+        return candidates
+
+    monkeypatch.setattr(ballot_service, "get_ballot_candidates", synchronise)
+
+    def attempt(credential):
+        with app.app_context():
+            try:
+                return accept_ballot_with_credential(
+                    credential, candidate_id, PAYLOAD, clock=lambda: NOW
+                )
+            finally:
+                db.session.remove()
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        futures = [workers.submit(attempt, credential) for credential in credentials]
+        references = [future.result(timeout=30) for future in futures]
+    assert len(set(references)) == 2
+    assert all(is_confirmation_reference(reference) for reference in references)
+    with app.app_context():
+        assert AnonymousBallot.query.count() == 2
+        assert BallotChainState.query.one().record_count == 2
+        assert BallotCredential.query.count() == 0
+        assert all(row.has_voted for row in VotingEligibility.query.all())
+        assert verify_ballot_chain("election-2026", "Melbourne") is True

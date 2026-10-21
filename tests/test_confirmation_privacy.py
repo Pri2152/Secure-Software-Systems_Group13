@@ -7,6 +7,7 @@ import audit
 import ballot_credentials
 from admin.candidates import add_draft_candidate
 from ballot_confirmation import is_confirmation_reference
+from ballot_integrity import verified_candidate_ids_for_tally
 from ballot_models import AnonymousBallot, BallotCredential, VotingEligibility
 from records import db
 from test_ballot_credentials import NOW, credential_app, issue, seed_voter
@@ -63,6 +64,7 @@ def test_different_preferences_return_unmapped_nonpreference_references(differen
     ballots = AnonymousBallot.query.all()
     assert len(ballots) == 2
     assert all(payload not in ballot.encrypted_ballot_json for payload in payloads for ballot in ballots)
+    assert verified_candidate_ids_for_tally("election-2026", "Melbourne") == tuple(candidate_ids)
     assert all(row.has_voted for row in VotingEligibility.query.all())
     assert BallotCredential.query.count() == 0
     snapshot = str(retained_snapshot())
@@ -73,6 +75,7 @@ def test_different_preferences_return_unmapped_nonpreference_references(differen
             *credentials, *payloads, "voter-001", "voter-002", "Candidate Alpha",
             "Candidate Beta", "Alpha Party", "Beta Party",
             *(ballot.ballot_id for ballot in ballots),
+            *(ballot.record_hash for ballot in ballots),
         ):
             assert private_value not in reference
         # Numeric IDs can coincidentally occur in random text; no choice field is returned.
