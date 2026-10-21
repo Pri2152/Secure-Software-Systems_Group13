@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>Cast your vote</title>
+  <link rel="stylesheet" href="{{ url_for('voting.static', filename='ballot.css') }}">
+  <script src="{{ url_for('voting.static', filename='ballot.js') }}" defer></script>
+</head>
+<body>
+  <main id="voting-content">
+    <p class="eyebrow">Electronic Voting Platform · Academic prototype</p>
+    <h1>Cast your vote</h1>
+    <p>{{ election_id }} · {{ division }}</p>
+    <p>Select one candidate. Submitting accepts your final digital vote.</p>
+    <form id="ballot-form" action="{{ url_for('voting.ballots') }}" method="post">
+      <fieldset>
+        <legend>Final candidates</legend>
+        {% for candidate in candidates %}
+        <label class="candidate">
+          <input type="radio" name="candidate_id" value="{{ candidate.candidate_id }}" required>
+          <span><strong>{{ candidate.name }}</strong><span class="party">{{ candidate.party }}</span></span>
+        </label>
+        {% endfor %}
+      </fieldset>
+      <p id="voting-error" role="alert"></p>
+      <button type="submit">Submit final vote</button>
+    </form>
+    <noscript>JavaScript is required for the secure ballot handoff.</noscript>
+  </main>
+</body>
+</html>
