@@ -37,8 +37,8 @@ x-app-service: &app-service
     - ALL
   security_opt:
     - no-new-privileges:true
-  # GET /healthz arrives with SR-19. Until then this check fails and
-  # the container shows as unhealthy; it is not restarted for that.
+  # SR-19: GET /healthz (platform_security/health.py), called inside
+  # the container; Nginx does not route it.
   healthcheck:
     test:
       - CMD

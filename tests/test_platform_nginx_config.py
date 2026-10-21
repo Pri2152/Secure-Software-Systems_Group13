@@ -309,7 +309,7 @@ def test_every_proxied_location_overwrites_evp_headers(https):
             "X-EVP-Client-Cert $ssl_client_escaped_cert",
             'X-Forwarded-For ""',
         ], args
-        assert args_of(children, "proxy_pass") == [["http://127.0.0.1:5000"]]
+        assert args_of(children, "proxy_pass") == [["http://evp_app"]]
 
 
 # Terminal address matches Compose (when terminal-sim arrives)
@@ -337,3 +337,41 @@ def test_terminal_address_is_on_the_edge_subnet():
             "ipv4_address"
         ]
         assert ipaddress.ip_network(f"{address}/32") == terminal
+
+
+# Upstream (SR-19 failover)
+
+def test_upstream_has_two_voter_access_servers(http):
+    [(args, children)] = directives(http, "upstream")
+
+    assert args == ["evp_app"]
+    assert args_of(children, "server") == [
+        ["voter-access-1:5000", "max_fails=3", "fail_timeout=10s"],
+        ["voter-access-2:5000", "max_fails=3", "fail_timeout=10s"],
+    ]
+
+
+def test_upstream_keeps_clients_on_one_replica(http):
+    [(_, children)] = directives(http, "upstream")
+
+    # Sessions are per replica (deploy/README.md, Limitations).
+    assert args_of(children, "ip_hash") == [[]]
+
+
+def test_upstream_names_are_compose_services():
+    import yaml
+
+    services = yaml.safe_load(
+        (REPO_ROOT / "deploy" / "docker-compose.yml").read_text()
+    )["services"]
+
+    for name in ("voter-access-1", "voter-access-2"):
+        assert "edge" in services[name]["networks"]
+
+
+def test_nothing_proxies_to_loopback(text):
+    assert "127.0.0.1:5000" not in text
+
+
+def test_healthz_is_not_routed_by_the_gateway(https):
+    assert location(https, "=", "/healthz") == [("return", ["404"], None)]

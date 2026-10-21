@@ -259,10 +259,26 @@ def test_app_service_healthcheck_calls_healthz(services, name):
     assert "http://127.0.0.1:5000/healthz" in " ".join(test)
 
 
-def test_healthz_comment_present():
-    text = COMPOSE_PATH.read_text(encoding="utf-8")
+def test_healthcheck_path_is_served_by_the_health_module():
+    from platform_security.health import HEALTH_PATH
 
-    assert "GET /healthz arrives with SR-19" in text
+    assert HEALTH_PATH == "/healthz"
+
+
+@pytest.mark.parametrize("name", ["voter-access-1", "voter-access-2"])
+def test_voter_replicas_restart_and_are_health_checked(services, name):
+    service = services[name]
+
+    assert service["restart"] == "unless-stopped"
+    assert service["healthcheck"]["test"][-1].endswith(
+        "urlopen('http://127.0.0.1:5000/healthz', timeout=3)"
+    )
+
+
+def test_gateway_depends_on_both_replicas(services):
+    assert set(services["gateway"]["depends_on"]) == {
+        "voter-access-1", "voter-access-2",
+    }
 
 
 # Container hardening

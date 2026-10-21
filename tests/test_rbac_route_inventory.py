@@ -27,6 +27,8 @@ PUBLIC_ENDPOINTS = frozenset({
     "static",
     # Plain landing text; no data, no state change.
     "home",
+    # SR-19 container health check; returns only {"status": "ok"}.
+    "health.healthz",
     # Must be public so a voter can obtain a CSRF
     # token before logging in (SR-16).
     "login_csrf",

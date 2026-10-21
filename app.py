@@ -25,6 +25,7 @@ from flask_session import Session
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 
 from gateway_security import evaluate_gateway_request
+from platform_security.health import health_blueprint
 from record_routes import create_record_blueprint
 from records import db
 
@@ -335,6 +336,8 @@ app.register_blueprint(
         require_active_session
     )
 )
+
+app.register_blueprint(health_blueprint)  # SR-19 GET /healthz
 
 
 if __name__ == "__main__":
