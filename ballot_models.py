@@ -68,6 +68,23 @@ class VotingEligibility(db.Model):
     )
 
 
+class BallotCredential(db.Model):
+    """Identity-side authorisation only; never stores ballot data."""
+
+    __tablename__ = "ballot_credentials"
+
+    verifier = db.Column(db.String(256), primary_key=True)
+    voter_id = db.Column(db.String(128), nullable=False)
+    election_id = db.Column(db.String(64), nullable=False)
+    expires_at = db.Column(db.Float, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "voter_id", "election_id", name="uq_credential_voter_election"
+        ),
+    )
+
+
 class AnonymousBallot(db.Model):
     """
     Stores an accepted ballot without voter identity.
