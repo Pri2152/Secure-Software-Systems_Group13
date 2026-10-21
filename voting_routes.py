@@ -1,6 +1,6 @@
 """Thin Workstream C controllers; existing services own voting decisions."""
 
-from flask import Blueprint, current_app, jsonify, request, session
+from flask import Blueprint, current_app, jsonify, render_template, request, session
 from flask_wtf.csrf import CSRFError
 from werkzeug.exceptions import RequestEntityTooLarge
 
@@ -8,6 +8,7 @@ from ballot_credentials import (
     CredentialError, accept_ballot_with_credential, issue_ballot_credential,
 )
 from records import db
+from ballot_service import EligibilityError, get_ballot_candidates, get_voting_eligibility
 
 
 WEB_BALLOT_PAYLOAD = '{"format":"single-choice-web-v1"}'
@@ -22,9 +23,31 @@ def create_voting_blueprint(require_active_session):
     def private_response(response):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
-        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Referrer-Policy"] = "same-origin"
         response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+            "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+        )
         return response
+
+    @bp.get("")
+    @require_active_session
+    def page():
+        try:
+            election_id = current_app.config["VOTING_ELECTION_ID"]
+            eligibility = get_voting_eligibility(session.get("voter_id"), election_id)
+            candidates = get_ballot_candidates(eligibility)
+            if not candidates:
+                raise EligibilityError("Voting unavailable")
+            return render_template("voting/ballot.html", election_id=election_id,
+                                   division=eligibility.electoral_division, candidates=candidates)
+        except EligibilityError:
+            db.session.rollback()
+            return render_template("voting/unavailable.html"), 409
+        except Exception:
+            db.session.rollback()
+            return render_template("voting/unavailable.html"), 503
 
     @bp.errorhandler(CSRFError)
     def csrf_failure(error):
