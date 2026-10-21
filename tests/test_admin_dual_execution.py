@@ -31,7 +31,7 @@ BULK = ("roll.propose_bulk", "roll.approve_bulk")
 
 
 @pytest.fixture
-def env():
+def env(pii_provider):
     with staff_environment() as environment:
         with environment.app.app_context():
             for position, name in enumerate(

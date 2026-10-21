@@ -282,7 +282,8 @@ def run_runtime(**env):
     return subprocess.run(
         [sys.executable, "-c", RUNTIME_PROBE, *PROBE_ADDRESSES],
         cwd=REPO_ROOT,
-        env=subprocess_env(EVP_LOCAL_LAB="1", **env),
+        # SR-13: the runtime needs a PII key; development keys here.
+        env=subprocess_env(EVP_LOCAL_LAB="1", EVP_CRYPTO_DEV_KEYS="1", **env),
         capture_output=True,
         text=True,
     )

@@ -69,11 +69,17 @@ x-voter-access: &voter-access
     # publishing and arrives from the edge network's gateway address.
     # The lab treats that one address as the simulated overseas mission.
     EVP_SIMULATED_MISSION_NETWORKS: "172.30.0.1/32"
+    # SR-13: only the PII key, listed in voter-access's own manifest.
+    EVP_KEY_DIR: /run/secrets/evp_keys
   secrets:
     - source: voter_demo_voter
       target: /run/evp/demo-voter.json
     - source: voter_registered_fingerprints
       target: /run/evp/registered_fingerprints.txt
+    - source: voter_access_keys_manifest
+      target: /run/secrets/evp_keys/manifest.json
+    - source: key_pii_v1
+      target: /run/secrets/evp_keys/pii_key_v1
   networks:
     - edge
     - identity_net
@@ -298,6 +304,8 @@ secrets:
     file: ./secrets/audit_db_password
   admin_audit_keys_manifest:
     file: ./secrets/keys/manifest-admin-audit.json
+  voter_access_keys_manifest:
+    file: ./secrets/keys/manifest-voter-access.json
   key_pii_v1:
     file: ./secrets/keys/pii_key_v1
   key_audit_hmac_v1:

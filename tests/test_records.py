@@ -18,7 +18,7 @@ from records import (
 
 
 @pytest.fixture
-def database():
+def database(pii_provider):
     test_app = Flask(__name__)
 
     test_app.config.update(

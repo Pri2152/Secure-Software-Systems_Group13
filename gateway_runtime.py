@@ -25,6 +25,7 @@ from auth import hash_password
 from gateway_security import parse_network_list
 from login_flow import LoginCoordinator, VoterRecord
 from mission_access import MissionAccessPolicy
+from platform_security.crypto_setup import install_pii_provider
 from records import db, EnrolmentRecord, AddressRecord
 
 
@@ -142,6 +143,8 @@ def configure_local_gateway():
         raise RuntimeError(
             "Local lab mode must be explicitly enabled"
         )
+
+    install_pii_provider()  # SR-13: refuses to start without the PII key
 
     policy = MissionAccessPolicy(
         mission_networks=[

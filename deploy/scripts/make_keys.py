@@ -96,6 +96,10 @@ COMPARTMENT_KEYS = {
         "audit.hmac-sha256.v1",
         "audit.ed25519.v1",
     ),
+    # Voter access encrypts contact emails and addresses (SR-13).
+    "voter-access": (
+        "pii.aes-256-gcm.v1",
+    ),
 }
 
 

@@ -40,6 +40,7 @@ GENERATED = {
 KEY_FILES = (
     "manifest.json",
     "manifest-admin-audit.json",
+    "manifest-voter-access.json",
     "pii_key_v1",
     "audit_hmac_v1",
     "audit_sign_v1",
