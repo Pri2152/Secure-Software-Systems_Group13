@@ -3,6 +3,9 @@
 ## Status and requirement
 
 Prototype-complete with the physical-store/service-credential limitation below.
+The SR-09 follow-up now returns an ephemeral confirmation after commit; see
+`SR09_IMPLEMENTATION.md`. The controls and baseline below describe the SR-08
+implementation before that follow-up.
 SR-08 requires anonymous one-time authorisation after eligibility confirmation,
 identity/ballot compartmentalisation, and retained records/logs without an
 individual voter-to-ballot identifier or correlatable ballot metadata.
