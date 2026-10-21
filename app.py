@@ -27,6 +27,7 @@ from flask_wtf.csrf import CSRFProtect, generate_csrf
 from gateway_security import evaluate_gateway_request
 from record_routes import create_record_blueprint
 from records import db
+from voting_routes import create_voting_blueprint
 
 
 app = Flask(__name__)
@@ -52,6 +53,7 @@ app.config.update(
     MAX_CONTENT_LENGTH=4096,
 
     LOGIN_COORDINATOR=None,
+    VOTING_ELECTION_ID=os.environ.get("EVP_ELECTION_ID") or "election-2026",
 
     SR07_GATEWAY_ENFORCED=(
         os.environ.get("SR07_GATEWAY_ENFORCED") == "1"
@@ -325,6 +327,8 @@ app.register_blueprint(
         require_active_session
     )
 )
+
+app.register_blueprint(create_voting_blueprint(require_active_session))
 
 
 if __name__ == "__main__":
