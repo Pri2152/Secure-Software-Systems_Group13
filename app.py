@@ -60,8 +60,12 @@ app.config.update(
 
     SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
     SQLALCHEMY_BINDS={
-        "ballot": os.environ.get("EVP_BALLOT_DB_URL", "sqlite:///:memory:"),
-        "audit": os.environ.get("EVP_AUDIT_DB_URL", "sqlite:///:memory:"),
+        name: os.environ[variable]
+        for name, variable in (
+            ("ballot", "EVP_BALLOT_DB_URL"),
+            ("audit", "EVP_AUDIT_DB_URL"),
+        )
+        if os.environ.get(variable)
     },
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
 )

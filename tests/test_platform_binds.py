@@ -2,7 +2,7 @@
 """
 SR-20 and SR-04 tests for the shared application.
 
-- Separate ballot and audit database binds
+- Ballot and audit database binds only when configured
 - Voter role set in the server-side session at login
 
 Reuses the Workstream A integration helpers.
@@ -14,73 +14,56 @@ import subprocess
 import sys
 from pathlib import Path
 
-from sqlalchemy import inspect, text
-
 import app as application
 
-from records import db
 from test_main_integration import environment, login  # noqa: F401
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_three_separate_engines():
-    with application.app.app_context():
-        engines = db.engines
+BIND_VARIABLES = ("EVP_BALLOT_DB_URL", "EVP_AUDIT_DB_URL")
 
-        assert set(engines) == {None, "ballot", "audit"}
-        assert len({id(engine) for engine in engines.values()}) == 3
+# Runs in a fresh interpreter, so the shared app is not re-imported.
+# Prints the configured binds, the engine names, and which engines
+# can see a table created only on the ballot engine.
+PROBE = """
+import json
+import app
+from records import db
+from sqlalchemy import inspect, text
 
+with app.app.app_context():
+    engines = db.engines
+    seen = {}
 
-def test_binds_default_to_in_memory_sqlite():
-    binds = application.app.config["SQLALCHEMY_BINDS"]
+    if "ballot" in engines:
+        with engines["ballot"].begin() as connection:
+            connection.execute(text("CREATE TABLE bind_probe (id INTEGER)"))
 
-    for name, variable in (
-        ("ballot", "EVP_BALLOT_DB_URL"),
-        ("audit", "EVP_AUDIT_DB_URL"),
-    ):
-        assert binds[name] == os.environ.get(
-            variable, "sqlite:///:memory:"
-        )
+        seen = {
+            str(name): inspect(engine).has_table("bind_probe")
+            for name, engine in engines.items()
+        }
 
-    assert (
-        application.app.config["SQLALCHEMY_DATABASE_URI"]
-        == "sqlite:///:memory:"
-    )
-
-
-def test_bind_databases_do_not_share_tables():
-    with application.app.app_context():
-        with db.engines["ballot"].begin() as connection:
-            connection.execute(
-                text("CREATE TABLE bind_probe (id INTEGER)")
-            )
-
-        try:
-            assert inspect(db.engines["ballot"]).has_table("bind_probe")
-            assert not inspect(db.engines["audit"]).has_table("bind_probe")
-            assert not inspect(db.engines[None]).has_table("bind_probe")
-        finally:
-            with db.engines["ballot"].begin() as connection:
-                connection.execute(text("DROP TABLE bind_probe"))
+    print(json.dumps({
+        "binds": app.app.config["SQLALCHEMY_BINDS"],
+        "engines": sorted(str(name) for name in engines),
+        "distinct": len({id(engine) for engine in engines.values()}),
+        "seen": seen,
+    }))
+"""
 
 
-def test_bind_urls_come_from_environment(tmp_path):
-    # A fresh interpreter, so the shared app is not re-imported.
-    child_env = dict(
-        os.environ,
-        EVP_BALLOT_DB_URL=f"sqlite:///{tmp_path / 'ballot.db'}",
-        EVP_AUDIT_DB_URL=f"sqlite:///{tmp_path / 'audit.db'}",
-    )
+def run_probe(**variables):
+    child_env = {
+        key: value for key, value in os.environ.items()
+        if key not in BIND_VARIABLES
+    }
+    child_env.update(variables)
 
     result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "import json, app; "
-            "print(json.dumps(app.app.config['SQLALCHEMY_BINDS']))",
-        ],
+        [sys.executable, "-c", PROBE],
         cwd=REPO_ROOT,
         env=child_env,
         capture_output=True,
@@ -88,10 +71,49 @@ def test_bind_urls_come_from_environment(tmp_path):
         check=True,
     )
 
-    assert json.loads(result.stdout.strip().splitlines()[-1]) == {
-        "ballot": child_env["EVP_BALLOT_DB_URL"],
-        "audit": child_env["EVP_AUDIT_DB_URL"],
-    }
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def test_no_binds_by_default():
+    probe = run_probe()
+
+    assert probe["binds"] == {}
+    assert probe["engines"] == ["None"]
+
+
+def test_empty_variables_add_no_binds():
+    probe = run_probe(EVP_BALLOT_DB_URL="", EVP_AUDIT_DB_URL="")
+
+    assert probe["binds"] == {}
+
+
+def test_both_binds_present_and_separate_when_set(tmp_path):
+    ballot_url = f"sqlite:///{tmp_path / 'ballot.db'}"
+    audit_url = f"sqlite:///{tmp_path / 'audit.db'}"
+
+    probe = run_probe(
+        EVP_BALLOT_DB_URL=ballot_url, EVP_AUDIT_DB_URL=audit_url
+    )
+
+    assert probe["binds"] == {"ballot": ballot_url, "audit": audit_url}
+    assert probe["engines"] == ["None", "audit", "ballot"]
+    assert probe["distinct"] == 3
+    assert probe["seen"] == {"None": False, "ballot": True, "audit": False}
+
+
+def test_each_bind_is_independent(tmp_path):
+    ballot_url = f"sqlite:///{tmp_path / 'ballot.db'}"
+
+    probe = run_probe(EVP_BALLOT_DB_URL=ballot_url)
+
+    assert probe["binds"] == {"ballot": ballot_url}
+
+
+def test_main_database_unchanged():
+    assert (
+        application.app.config["SQLALCHEMY_DATABASE_URI"]
+        == "sqlite:///:memory:"
+    )
 
 
 def test_login_sets_voter_role(environment):  # noqa: F811
