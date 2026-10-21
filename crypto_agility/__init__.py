@@ -1,0 +1,199 @@
+"""
+SR-14: Central crypto-agility service (Workstream B).
+
+Usage (handbook section 6.1):
+
+    from crypto_agility import crypto
+
+    value = crypto.hash(data)               # "sha256:<hex>"
+    envelope = crypto.mac("audit", data)    # {"alg", "kid", "v", "sig"}
+    envelope = crypto.sign("ballot", data)  # {"alg", "kid", "v", "sig"}
+    ok = crypto.verify("ballot", data, envelope)
+    envelope = crypto.encrypt("pii", data)  # AES-256-GCM
+    data = crypto.decrypt("pii", envelope)  # DecryptionError on tamper
+    envelope = crypto.seal("election", data)
+    data = crypto.open("election", envelope)  # private side only
+
+The `crypto` object also satisfies Workstream E's
+platform_security.field_crypto provider interface
+(encrypt(purpose, bytes) / decrypt(purpose, dict)).
+
+Security controls:
+- Algorithm registry and secure factory: the crypto
+  policy, not the calling code, picks each algorithm
+- Configuration-driven defaults and allow-lists, so
+  algorithms are replaced without code changes
+- Self-describing, versioned outputs that still
+  verify after the default algorithm changes
+- Keys loaded from secrets, never from Git, and
+  identified by version (key ID) for rotation
+- Reserved, disabled post-quantum signature slot
+  (ml-dsa-65) documenting the migration path
+- Fails closed: with no key configuration in the
+  environment, the first crypto call raises
+  CryptoNotConfigured instead of using weak defaults
+
+Configuration (environment):
+- EVP_KEY_DIR            directory of key files plus
+                         manifest.json (Docker secrets);
+                         see keys.KeyStore.from_directory
+- EVP_CRYPTO_DEV_KEYS=1  generate throwaway keys in
+                         memory (development/tests only)
+- EVP_CRYPTO_POLICY      path to a policy JSON file
+With neither EVP_KEY_DIR nor EVP_CRYPTO_DEV_KEYS=1,
+crypto raises CryptoNotConfigured.
+
+Local academic prototype.
+"""
+
+import logging
+import os
+import threading
+
+from .errors import (
+    AlgorithmNotAllowed,
+    AlgorithmUnavailable,
+    CryptoError,
+    CryptoNotConfigured,
+    DecryptionError,
+    InvalidEnvelope,
+    InvalidPolicy,
+    KeyNotFound,
+    UnknownAlgorithm,
+)
+from .keys import KeyStore
+from .policy import DEFAULT_POLICY, CryptoPolicy
+from .registry import AlgorithmRegistry, CryptoFactory, default_registry
+from .service import CryptoService
+
+
+ENV_KEY_DIR = "EVP_KEY_DIR"
+ENV_DEV_KEYS = "EVP_CRYPTO_DEV_KEYS"
+ENV_POLICY = "EVP_CRYPTO_POLICY"
+
+logger = logging.getLogger("evp.crypto")
+
+_service: CryptoService | None = None
+_service_lock = threading.Lock()
+
+
+def build_service(
+    *,
+    key_dir: str | None = None,
+    dev_keys: bool = False,
+    policy: CryptoPolicy | None = None,
+    policy_path: str | None = None,
+    registry: AlgorithmRegistry | None = None,
+) -> CryptoService:
+    """
+    Build a service from explicit settings. Without a
+    key source this raises CryptoNotConfigured.
+    """
+
+    registry = registry or default_registry()
+
+    if policy is None:
+        policy = (
+            CryptoPolicy.from_json_file(policy_path)
+            if policy_path
+            else DEFAULT_POLICY
+        )
+
+    if key_dir:
+        keystore = KeyStore.from_directory(key_dir, registry)
+    elif dev_keys:
+        logger.warning("crypto_dev_keys_in_use")
+        keystore = KeyStore.ephemeral()
+    else:
+        raise CryptoNotConfigured("No cryptographic keys are configured")
+
+    return CryptoService(registry, policy, keystore)
+
+
+def build_service_from_env(environ=None) -> CryptoService:
+    environ = os.environ if environ is None else environ
+
+    return build_service(
+        key_dir=environ.get(ENV_KEY_DIR) or None,
+        dev_keys=environ.get(ENV_DEV_KEYS) == "1",
+        policy_path=environ.get(ENV_POLICY) or None,
+    )
+
+
+def configure(service: CryptoService | None) -> None:
+    """Install the service behind `crypto`; None resets it."""
+
+    global _service
+
+    if service is not None and not isinstance(service, CryptoService):
+        raise TypeError("configure() needs a CryptoService")
+
+    with _service_lock:
+        _service = service
+
+
+def get_service() -> CryptoService:
+    """The configured service, built from the environment on first use."""
+
+    global _service
+
+    with _service_lock:
+        if _service is None:
+            _service = build_service_from_env()
+
+        return _service
+
+
+class _ConfiguredCrypto:
+    """
+    Module-level facade. Configuration is resolved at
+    the first call, so importing never needs keys.
+    """
+
+    def hash(self, data: bytes) -> str:
+        return get_service().hash(data)
+
+    def verify_hash(self, data: bytes, value: str) -> bool:
+        return get_service().verify_hash(data, value)
+
+    def mac(self, purpose: str, data: bytes) -> dict:
+        return get_service().mac(purpose, data)
+
+    def verify_mac(self, purpose: str, data: bytes, envelope) -> bool:
+        return get_service().verify_mac(purpose, data, envelope)
+
+    def sign(self, purpose: str, data: bytes) -> dict:
+        return get_service().sign(purpose, data)
+
+    def verify(self, purpose: str, data: bytes, envelope) -> bool:
+        return get_service().verify(purpose, data, envelope)
+
+    def public_key_pem(self, purpose: str) -> bytes:
+        return get_service().public_key_pem(purpose)
+
+    def encrypt(
+        self, purpose: str, plaintext: bytes, aad: bytes = b""
+    ) -> dict:
+        return get_service().encrypt(purpose, plaintext, aad)
+
+    def decrypt(self, purpose: str, envelope, aad: bytes = b"") -> bytes:
+        return get_service().decrypt(purpose, envelope, aad)
+
+    def seal(self, purpose: str, plaintext: bytes) -> dict:
+        return get_service().seal(purpose, plaintext)
+
+    def open(self, purpose: str, envelope) -> bytes:
+        return get_service().open(purpose, envelope)
+
+    def hash_password(self, password: str) -> str:
+        return get_service().hash_password(password)
+
+    def verify_and_upgrade_password(
+        self, stored_hash: str, password: str
+    ) -> tuple[bool, str | None]:
+        return get_service().verify_and_upgrade_password(
+            stored_hash, password
+        )
+
+
+crypto = _ConfiguredCrypto()
