@@ -4,8 +4,6 @@ Workstream C ballot service.
 SR-03: Eligibility and single-vote enforcement
 """
 
-import secrets
-
 from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -13,7 +11,8 @@ from admin.candidates import (
     CandidateListNotFinal,
     final_candidate_list,
 )
-from ballot_models import AnonymousBallot, VotingEligibility
+from ballot_models import VotingEligibility
+from ballot_storage import store_anonymous_ballot
 from records import EnrolmentRecord, db
 
 
@@ -132,60 +131,13 @@ def accept_ballot(
     """
 
     try:
-        if (
-            not isinstance(candidate_id, int)
-            or isinstance(candidate_id, bool)
-            or candidate_id <= 0
-        ):
-            raise BallotAcceptanceError("Invalid candidate selection")
-
-        if (
-            not isinstance(encrypted_ballot_json, str)
-            or not encrypted_ballot_json.strip()
-            or len(encrypted_ballot_json) > 65536
-        ):
-            raise BallotAcceptanceError("Invalid opaque ballot payload")
-
-        record = get_voting_eligibility(voter_id, election_id)
-        candidates = get_ballot_candidates(record)
-
-        if candidate_id not in {
-            candidate.candidate_id for candidate in candidates
-        }:
-            raise BallotAcceptanceError("Invalid candidate selection")
-
-        # Claim the eligibility row before storing the ballot.
-        claimed = db.session.execute(
-            update(VotingEligibility)
-            .where(
-                VotingEligibility.id == record.id,
-                VotingEligibility.voter_id == voter_id,
-                VotingEligibility.election_id == election_id,
-                VotingEligibility.eligible.is_(True),
-                VotingEligibility.has_voted.is_(False),
-                VotingEligibility.electoral_division
-                == record.electoral_division,
-                VotingEligibility.state_code == record.state_code,
-                select(EnrolmentRecord.id).where(
-                    EnrolmentRecord.owner_voter_id == voter_id,
-                    EnrolmentRecord.enrolment_status == "enrolled",
-                ).exists(),
-            )
-            .values(has_voted=True)
-            .execution_options(synchronize_session=False)
-        ).rowcount
-
-        if claimed != 1:
-            raise BallotAcceptanceError(
-                "Vote already accepted or eligibility changed"
-            )
-
-        db.session.add(AnonymousBallot(
-            ballot_id=secrets.token_hex(32),
-            election_id=election_id,
-            electoral_division=record.electoral_division,
-            encrypted_ballot_json=encrypted_ballot_json,
-        ))
+        record = _validate_ballot(
+            voter_id, election_id, candidate_id, encrypted_ballot_json
+        )
+        _claim_eligibility(record, voter_id, election_id)
+        store_anonymous_ballot(
+            election_id, record.electoral_division, encrypted_ballot_json
+        )
         db.session.commit()
 
     except EligibilityError as error:
@@ -197,3 +149,57 @@ def accept_ballot(
     except Exception:
         db.session.rollback()
         raise
+
+
+def _validate_ballot(voter_id, election_id, candidate_id, encrypted_ballot_json):
+    if (
+        not isinstance(candidate_id, int)
+        or isinstance(candidate_id, bool)
+        or candidate_id <= 0
+    ):
+        raise BallotAcceptanceError("Invalid candidate selection")
+
+    if (
+        not isinstance(encrypted_ballot_json, str)
+        or not encrypted_ballot_json.strip()
+        or len(encrypted_ballot_json) > 65536
+    ):
+        raise BallotAcceptanceError("Invalid opaque ballot payload")
+
+    record = get_voting_eligibility(voter_id, election_id)
+    candidates = get_ballot_candidates(record)
+
+    if candidate_id not in {
+        candidate.candidate_id for candidate in candidates
+    }:
+        raise BallotAcceptanceError("Invalid candidate selection")
+
+    return record
+
+
+def _claim_eligibility(record, voter_id, election_id):
+    # Claim the eligibility row before storing the ballot.
+    claimed = db.session.execute(
+        update(VotingEligibility)
+        .where(
+            VotingEligibility.id == record.id,
+            VotingEligibility.voter_id == voter_id,
+            VotingEligibility.election_id == election_id,
+            VotingEligibility.eligible.is_(True),
+            VotingEligibility.has_voted.is_(False),
+            VotingEligibility.electoral_division
+            == record.electoral_division,
+            VotingEligibility.state_code == record.state_code,
+            select(EnrolmentRecord.id).where(
+                EnrolmentRecord.owner_voter_id == voter_id,
+                EnrolmentRecord.enrolment_status == "enrolled",
+            ).exists(),
+        )
+        .values(has_voted=True)
+        .execution_options(synchronize_session=False)
+    ).rowcount
+
+    if claimed != 1:
+        raise BallotAcceptanceError(
+            "Vote already accepted or eligibility changed"
+        )

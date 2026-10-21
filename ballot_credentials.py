@@ -4,11 +4,13 @@ import re
 import secrets
 from datetime import datetime, timezone
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from ballot_models import BallotCredential
 from ballot_service import EligibilityError, get_voting_eligibility
+from ballot_service import _claim_eligibility, _validate_ballot
+from ballot_storage import store_anonymous_ballot
 from crypto_agility import CryptoError, crypto
 from records import db
 
@@ -63,6 +65,51 @@ def issue_ballot_credential(voter_id, election_id, *, clock=None):
         ))
         db.session.commit()
         return credential
+    except (EligibilityError, CredentialError, CryptoError, SQLAlchemyError):
+        db.session.rollback()
+        raise CredentialError("Credential authorisation failed") from None
+    except Exception:
+        db.session.rollback()
+        raise
+
+
+def accept_ballot_with_credential(
+    credential, candidate_id, encrypted_ballot_json, *, clock=None
+):
+    """
+    Accept without caller-supplied identity; commit all three changes together.
+
+    No receipt or ballot ID is returned. Owns the current session transaction.
+    """
+    try:
+        verifier = credential_verifier(credential)
+        authorisation = db.session.execute(
+            select(BallotCredential).where(BallotCredential.verifier == verifier)
+        ).scalar_one_or_none()
+        if (
+            authorisation is None
+            or authorisation.expires_at <= credential_timestamp(clock)
+        ):
+            raise CredentialError("Credential authorisation failed")
+
+        record = _validate_ballot(
+            authorisation.voter_id, authorisation.election_id,
+            candidate_id, encrypted_ballot_json,
+        )
+        _claim_eligibility(record, authorisation.voter_id, authorisation.election_id)
+        consumed = db.session.execute(
+            delete(BallotCredential).where(
+                BallotCredential.verifier == verifier,
+                BallotCredential.expires_at > credential_timestamp(clock),
+            ).execution_options(synchronize_session=False)
+        ).rowcount
+        if consumed != 1:
+            raise CredentialError("Credential authorisation failed")
+
+        store_anonymous_ballot(
+            record.election_id, record.electoral_division, encrypted_ballot_json
+        )
+        db.session.commit()
     except (EligibilityError, CredentialError, CryptoError, SQLAlchemyError):
         db.session.rollback()
         raise CredentialError("Credential authorisation failed") from None
