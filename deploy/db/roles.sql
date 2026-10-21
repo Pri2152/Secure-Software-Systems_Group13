@@ -9,12 +9,18 @@
 --   SELECT (to read the last entry and chain the next one) and INSERT,
 --   never UPDATE or DELETE
 -- - The tally service can only read ballots
+-- - The staff admin service (admin_identity) reaches only Workstream B's
+--   tables, never voter records, and has no DELETE
+-- - No account can CREATE, ALTER or DROP: tables are created as root
+--   by deploy/scripts/apply_db_security.sh
 --
 -- Passwords are ${...} placeholders. They are filled from environment
 -- variables / Docker secrets at init time and are never committed.
 --
--- Run after the application schema exists: MySQL requires each table
--- named in a table-level GRANT to exist.
+-- Applied by deploy/scripts/apply_db_security.sh, which first creates
+-- Workstream B's tables as root: MySQL requires each table named in a
+-- table-level GRANT to exist. GRANTs on tables that do not exist yet
+-- are skipped with a warning.
 
 CREATE DATABASE IF NOT EXISTS identity_db;
 CREATE DATABASE IF NOT EXISTS ballot_db;
@@ -24,6 +30,15 @@ CREATE DATABASE IF NOT EXISTS audit_db;
 CREATE USER IF NOT EXISTS 'voter_access'@'%' IDENTIFIED BY '${VOTER_ACCESS_DB_PASSWORD}';
 GRANT SELECT, INSERT, UPDATE ON identity_db.enrolment_records TO 'voter_access'@'%';
 GRANT SELECT, UPDATE ON identity_db.address_records TO 'voter_access'@'%';
+
+-- Staff administration (Workstream B, admin-audit): staff accounts,
+-- elevation grants, candidates and dual-authorisation operations only.
+-- No DELETE: revoked grants and finished operations are kept as history.
+CREATE USER IF NOT EXISTS 'admin_identity'@'%' IDENTIFIED BY '${ADMIN_DB_PASSWORD}';
+GRANT SELECT, INSERT, UPDATE ON identity_db.staff_accounts TO 'admin_identity'@'%';
+GRANT SELECT, INSERT, UPDATE ON identity_db.staff_elevation_grants TO 'admin_identity'@'%';
+GRANT SELECT, INSERT, UPDATE ON identity_db.candidates TO 'admin_identity'@'%';
+GRANT SELECT, INSERT, UPDATE ON identity_db.pending_operations TO 'admin_identity'@'%';
 
 -- Ballot service (Workstream C): cast ballots are never changed or removed.
 CREATE USER IF NOT EXISTS 'ballot_writer'@'%' IDENTIFIED BY '${BALLOT_DB_PASSWORD}';

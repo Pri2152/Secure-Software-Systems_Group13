@@ -28,24 +28,27 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO_ROOT / "deploy" / "scripts"
 SCRIPT_PATH = SCRIPTS / "apply_db_security.sh"
 PLAN_PATH = SCRIPTS / "roles_plan.py"
+SCHEMA_PATH = SCRIPTS / "schema_sql.py"
 README_PATH = REPO_ROOT / "deploy" / "README.md"
 
 PASSWORDS = {
     "voter_access_db_password": "V" * 20 + "oterAccessPw_123456789",
+    "admin_db_password": "D" * 20 + "minIdentityPw_12345678",
     "ballot_db_password": "B" * 20 + "allotWriterPw_12345678",
     "audit_db_password": "A" * 20 + "uditWriterPw_123456789",
     "tally_db_password": "T" * 20 + "allyReaderPw_123456789",
 }
 
+STAFF_TABLES = (
+    "identity_db.staff_accounts identity_db.staff_elevation_grants "
+    "identity_db.candidates identity_db.pending_operations"
+)
+VOTER_TABLES = "identity_db.enrolment_records identity_db.address_records"
 ALL_TABLES = (
-    "identity_db.enrolment_records identity_db.address_records "
-    "identity_db.pending_operations ballot_db.ballots "
+    f"{VOTER_TABLES} {STAFF_TABLES} ballot_db.ballots "
     "ballot_db.ballot_keys audit_db.audit_log"
 )
-NO_BALLOT_TABLES = (
-    "identity_db.enrolment_records identity_db.address_records "
-    "identity_db.pending_operations audit_db.audit_log"
-)
+NO_BALLOT_TABLES = f"{VOTER_TABLES} {STAFF_TABLES} audit_db.audit_log"
 
 
 def script_text():
@@ -141,7 +144,7 @@ def test_readme_lists_commands_in_order():
     section = text[text.index("## Database accounts and triggers"):]
     order = [
         "bash deploy/scripts/make_secrets.sh",
-        "docker compose -f deploy/docker-compose.yml --profile full up -d --build",
+        "docker compose -f deploy/docker-compose.yml up -d --build",
         "bash deploy/scripts/apply_db_security.sh",
     ]
 
@@ -170,7 +173,7 @@ ROLES_SQL = REPO_ROOT / "deploy" / "db" / "roles.sql"
 def test_plan_sends_each_user_only_to_its_own_server(secrets_dir):
     plan = load_plan()
     expected = {
-        "db-identity": {"voter_access"},
+        "db-identity": {"voter_access", "admin_identity"},
         "db-ballot": {"ballot_writer", "tally_reader"},
         "db-audit": {"audit_writer"},
     }
@@ -219,6 +222,10 @@ def test_plan_targets_cover_every_grant():
     assert load_plan().targets(ROLES_SQL) == [
         "db-identity identity_db enrolment_records",
         "db-identity identity_db address_records",
+        "db-identity identity_db staff_accounts",
+        "db-identity identity_db staff_elevation_grants",
+        "db-identity identity_db candidates",
+        "db-identity identity_db pending_operations",
         "db-ballot ballot_db ballots",
         "db-ballot ballot_db ballot_keys",
         "db-audit audit_db audit_log",
@@ -293,11 +300,19 @@ FAKE_DOCKER = textwrap.dedent('''\
                 r"table_schema = '(\\w+)' AND table_name = '(\\w+)'", query
             ).groups()
             record({{"argv": args, "service": service, "query": True}})
-            tables = os.environ["FAKE_TABLES"].split()
+            with open(os.environ["FAKE_STATE"]) as handle:
+                tables = handle.read().split()
             print("1" if f"{{schema}}.{{table}}" in tables else "0")
             sys.exit(0)
 
-        record({{"argv": args, "service": service, "stdin": sys.stdin.read()}})
+        sql = sys.stdin.read()
+        record({{"argv": args, "service": service, "stdin": sql}})
+
+        # Remember tables created as root, like a real server would.
+        database = re.search(r"USE (\w+);", sql)
+        for table in re.findall(r"CREATE TABLE (\w+)", sql):
+            with open(os.environ["FAKE_STATE"], "a") as handle:
+                handle.write(f" {{database.group(1)}}.{{table}}")
         sys.exit(0)
 
     sys.exit(3)
@@ -310,6 +325,7 @@ def sandbox(tmp_path):
     scripts.mkdir(parents=True)
     shutil.copy2(SCRIPT_PATH, scripts / SCRIPT_PATH.name)
     shutil.copy2(PLAN_PATH, scripts / PLAN_PATH.name)
+    shutil.copy2(SCHEMA_PATH, scripts / SCHEMA_PATH.name)
     shutil.copytree(REPO_ROOT / "deploy" / "db", tmp_path / "deploy" / "db")
 
     secrets = tmp_path / "deploy" / "secrets"
@@ -334,6 +350,8 @@ def run_apply(sandbox, tables=ALL_TABLES,
               running="db-identity db-ballot db-audit"):
     log = sandbox / "docker.log"
     log.touch()
+    state = sandbox / "tables.txt"
+    state.write_text(tables)
 
     result = subprocess.run(
         ["bash", str(sandbox / "deploy" / "scripts" / SCRIPT_PATH.name)],
@@ -342,8 +360,12 @@ def run_apply(sandbox, tables=ALL_TABLES,
             os.environ,
             PATH=f"{sandbox / 'bin'}{os.pathsep}{os.environ['PATH']}",
             FAKE_DOCKER_LOG=str(log),
-            FAKE_TABLES=tables,
+            FAKE_STATE=str(state),
             FAKE_RUNNING=running,
+            # The sandbox has no .venv or app code: use this Python
+            # and the repository's Workstream B models.
+            EVP_APP_PYTHON=sys.executable,
+            PYTHONPATH=str(REPO_ROOT),
         ),
         capture_output=True,
         text=True,
@@ -378,15 +400,17 @@ def test_each_container_gets_only_its_own_password(sandbox):
     sent = dict(applied(calls)[:3])
 
     assert PASSWORDS["voter_access_db_password"] in sent["db-identity"]
+    assert PASSWORDS["admin_db_password"] in sent["db-identity"]
     assert PASSWORDS["audit_db_password"] in sent["db-audit"]
 
     for service, sql in sent.items():
         others = {
             "db-identity": ("ballot_db_password", "tally_db_password",
                             "audit_db_password"),
-            "db-ballot": ("voter_access_db_password", "audit_db_password"),
-            "db-audit": ("voter_access_db_password", "ballot_db_password",
-                         "tally_db_password"),
+            "db-ballot": ("voter_access_db_password", "admin_db_password",
+                          "audit_db_password"),
+            "db-audit": ("voter_access_db_password", "admin_db_password",
+                         "ballot_db_password", "tally_db_password"),
         }[service]
 
         for name in others:
@@ -433,18 +457,97 @@ def test_missing_ballot_tables_are_skipped_with_warning(sandbox):
     )["db-audit"]
 
 
-@pytest.mark.parametrize("missing", [
-    "audit_db.audit_log",
-    "identity_db.pending_operations",
-])
-def test_missing_trigger_table_stops_before_applying(sandbox, missing):
-    tables = ALL_TABLES.replace(missing, "")
+def test_missing_staff_tables_are_created_as_root_first(sandbox):
+    result, calls = run_apply(
+        sandbox, tables=f"{VOTER_TABLES} ballot_db.ballots ballot_db.ballot_keys"
+    )
 
-    result, calls = run_apply(sandbox, tables=tables)
+    assert result.returncode == 0, result.stderr
+
+    sent = applied(calls)
+    created = [
+        (service, re.search(r"CREATE TABLE (\w+)", sql).group(1))
+        for service, sql in sent[:5]
+    ]
+
+    assert created == [
+        ("db-identity", "staff_accounts"),
+        ("db-identity", "staff_elevation_grants"),
+        ("db-identity", "candidates"),
+        ("db-identity", "pending_operations"),
+        ("db-audit", "audit_log"),
+    ]
+    assert "Created audit_db.audit_log on db-audit" in result.stdout
+
+    # GRANTs on the new tables are applied, not skipped.
+    identity = dict(sent[5:8])["db-identity"]
+
+    assert (
+        "GRANT SELECT, INSERT, UPDATE ON identity_db.pending_operations "
+        "TO 'admin_identity'@'%';" in identity
+    )
+    assert "WARNING" not in result.stderr
+
+
+def test_existing_tables_are_not_recreated(sandbox):
+    _, calls = run_apply(sandbox)
+
+    for _, sql in applied(calls):
+        assert "CREATE TABLE" not in sql
+
+
+def test_schema_never_creates_voter_record_tables(sandbox):
+    _, calls = run_apply(sandbox, tables="")
+
+    created = " ".join(sql for _, sql in applied(calls))
+
+    assert "CREATE TABLE enrolment_records" not in created
+    assert "CREATE TABLE address_records" not in created
+
+
+def test_schema_tables_match_workstream_b_models():
+    result = subprocess.run(
+        [sys.executable, str(SCHEMA_PATH), "tables"],
+        capture_output=True, text=True, check=True,
+    )
+
+    assert result.stdout.split("\n")[:5] == [
+        "db-identity identity_db staff_accounts",
+        "db-identity identity_db staff_elevation_grants",
+        "db-identity identity_db candidates",
+        "db-identity identity_db pending_operations",
+        "db-audit audit_db audit_log",
+    ]
+
+
+def test_schema_sql_is_mysql_ddl_only():
+    result = subprocess.run(
+        [sys.executable, str(SCHEMA_PATH), "create", "staff_elevation_grants"],
+        capture_output=True, text=True, check=True,
+    )
+    statements = [
+        statement.strip() for statement in result.stdout.split(";")
+        if statement.strip()
+    ]
+
+    assert statements[0] == "USE identity_db"
+    assert statements[1].startswith("CREATE TABLE staff_elevation_grants (")
+    assert "AUTO_INCREMENT" in statements[1]
+    assert statements[2].startswith("CREATE INDEX ")
+    assert all(
+        statement.startswith(("USE ", "CREATE TABLE ", "CREATE INDEX "))
+        for statement in statements
+    )
+
+
+def test_schema_refuses_unknown_tables():
+    result = subprocess.run(
+        [sys.executable, str(SCHEMA_PATH), "create", "enrolment_records"],
+        capture_output=True, text=True,
+    )
 
     assert result.returncode != 0
-    assert missing in result.stderr
-    assert applied(calls) == []
+    assert result.stdout == ""
 
 
 def test_database_not_running_stops_before_applying(sandbox):

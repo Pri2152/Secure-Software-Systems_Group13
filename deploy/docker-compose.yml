@@ -14,8 +14,9 @@
 # configuration and local certificate folder read-only. Workstream E
 # does not create or change certificates or TLS settings.
 #
-# Start (from the repository root):
+# Start (from the repository root), then apply database accounts:
 #   docker compose -f deploy/docker-compose.yml up -d --build
+#   bash deploy/scripts/apply_db_security.sh
 # Services under the "full" profile start only with --profile full.
 #
 # Local academic prototype.
@@ -109,11 +110,49 @@ services:
     <<: *voter-access
 
   # Workstream B: staff authentication, SR-06 and audit reader.
-  # Remove the profile when admin/wsgi.py is merged to main.
+  # Settings from admin/wsgi.py. It starts once apply_db_security.sh has
+  # created its tables and database accounts; until then it restarts.
   admin-audit:
     <<: *app-service
-    profiles: ["full"]
-    command: ["gunicorn", "--workers", "1", "--bind", "0.0.0.0:5000", "admin.wsgi:app"]
+    # The database URLs need the account passwords, so they are built
+    # here from the secret files at start-up and never stored in
+    # Compose. "$$" is a literal "$" for the shell.
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        identity_pw="$$(cat /run/secrets/admin_db_password)"
+        audit_pw="$$(cat /run/secrets/audit_db_password)"
+        export EVP_IDENTITY_DB_URL="mysql+pymysql://admin_identity:$${identity_pw}@db-identity:3306/identity_db"
+        export EVP_AUDIT_DB_URL="mysql+pymysql://audit_writer:$${audit_pw}@db-audit:3306/audit_db"
+        unset identity_pw audit_pw
+        exec gunicorn --workers 1 --bind 0.0.0.0:5000 admin.wsgi:app
+    environment:
+      SECRET_KEY_FILE: /run/secrets/flask_secret_key
+      # Only the keys this compartment uses, listed in its own manifest.
+      EVP_KEY_DIR: /run/secrets/evp_keys
+      EVP_AUDIT_ARCHIVE: /var/lib/evp/audit/checkpoints.jsonl
+    secrets:
+      - flask_secret_key
+      - admin_db_password
+      - audit_db_password
+      - source: admin_audit_keys_manifest
+        target: /run/secrets/evp_keys/manifest.json
+      - source: key_pii_v1
+        target: /run/secrets/evp_keys/pii_key_v1
+      - source: key_audit_hmac_v1
+        target: /run/secrets/evp_keys/audit_hmac_v1
+      - source: key_audit_sign_v1
+        target: /run/secrets/evp_keys/audit_sign_v1
+    volumes:
+      # Signed checkpoints, kept apart from the audit database (SR-17).
+      - audit_archive:/var/lib/evp/audit
+    depends_on:
+      db-identity:
+        condition: service_healthy
+      db-audit:
+        condition: service_healthy
     networks:
       - edge
       - audit_net
@@ -148,9 +187,8 @@ services:
     networks:
       - results_net
 
-  # deploy/db/roles.sql is not mounted yet: its ${...} password
-  # placeholders must be filled at init time first, or MySQL would
-  # store the placeholder text as the password.
+  # deploy/db/roles.sql is applied by deploy/scripts/apply_db_security.sh,
+  # which fills its ${...} password placeholders from deploy/secrets/.
   db-identity:
     image: mysql:8.4.11
     restart: unless-stopped
@@ -237,6 +275,7 @@ volumes:
   identity_data: {}
   ballot_data: {}
   audit_data: {}
+  audit_archive: {}
   backups: {}
 
 # Files are created locally and are git-ignored (deploy/secrets/).
@@ -251,3 +290,17 @@ secrets:
     file: ./secrets/demo-voter.json
   voter_registered_fingerprints:
     file: ./secrets/registered_fingerprints.txt
+  flask_secret_key:
+    file: ./secrets/flask_secret_key
+  admin_db_password:
+    file: ./secrets/admin_db_password
+  audit_db_password:
+    file: ./secrets/audit_db_password
+  admin_audit_keys_manifest:
+    file: ./secrets/keys/manifest-admin-audit.json
+  key_pii_v1:
+    file: ./secrets/keys/pii_key_v1
+  key_audit_hmac_v1:
+    file: ./secrets/keys/audit_hmac_v1
+  key_audit_sign_v1:
+    file: ./secrets/keys/audit_sign_v1

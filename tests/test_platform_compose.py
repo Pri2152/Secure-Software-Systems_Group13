@@ -28,7 +28,7 @@ APP_SERVICES = [
     "results-consumer",
 ]
 
-PENDING_SERVICES = ["admin-audit", "ballot", "tally", "results-consumer"]
+PENDING_SERVICES = ["ballot", "tally", "results-consumer"]
 
 DATABASES = {
     "db-identity": "identity_net",
@@ -111,7 +111,8 @@ def test_pending_compartments_are_in_full_profile(services, name):
 
 @pytest.mark.parametrize(
     "name",
-    ["gateway", "voter-access-1", "voter-access-2", *DATABASES, "backup"],
+    ["gateway", "voter-access-1", "voter-access-2", "admin-audit",
+     *DATABASES, "backup"],
 )
 def test_available_services_start_by_default(services, name):
     assert "profiles" not in services[name]
@@ -120,7 +121,7 @@ def test_available_services_start_by_default(services, name):
 def test_profile_removal_comment_for_each_pending_service():
     text = COMPOSE_PATH.read_text(encoding="utf-8")
 
-    for entrypoint in ("admin/wsgi.py", "ballot/wsgi.py",
+    for entrypoint in ("ballot/wsgi.py",
                        "verification/wsgi.py", "results_consumer/wsgi.py"):
         assert f"Remove the profile when {entrypoint} is merged" in text
 
@@ -231,7 +232,8 @@ def test_no_inline_secret_values(services):
     for name, service in services.items():
         for key, value in (service.get("environment") or {}).items():
             if re.search(r"PASSWORD|SECRET|TOKEN|KEY", key):
-                assert key.endswith("_FILE"), f"{name}: {key}"
+                # A file, or a folder of secret files (EVP_KEY_DIR).
+                assert key.endswith(("_FILE", "_DIR")), f"{name}: {key}"
                 assert str(value).startswith("/run/secrets/"), f"{name}: {key}"
 
 
@@ -378,7 +380,10 @@ def environment_items(service):
 def looks_like_secret(key, value):
     import ipaddress
 
-    if SECRET_NAME.search(key.upper()) and not key.upper().endswith("_FILE"):
+    if SECRET_NAME.search(key.upper()) and not (
+        key.upper().endswith("_FILE")
+        or (key.upper().endswith("_DIR") and value.startswith("/run/secrets/"))
+    ):
         return True
 
     if value.startswith("/run/secrets/"):
@@ -532,3 +537,124 @@ def test_check_catches_each_broken_rule(compose, label):
 ])
 def test_ordinary_settings_are_not_flagged(key, value):
     assert looks_like_secret(key, value) is False
+
+
+# admin-audit (Workstream B), settings from admin/wsgi.py
+
+ADMIN_KEY_FILES = {"manifest.json", "pii_key_v1", "audit_hmac_v1",
+                   "audit_sign_v1"}
+
+
+@pytest.fixture(scope="module")
+def admin(services):
+    return services["admin-audit"]
+
+
+def admin_script(admin):
+    command = admin["command"]
+
+    assert command[:2] == ["sh", "-c"]
+    return command[2]
+
+
+def test_admin_runs_its_own_entrypoint(admin):
+    script = admin_script(admin)
+
+    assert script.strip().splitlines()[0] == "set -eu"
+    assert script.strip().splitlines()[-1] == (
+        "exec gunicorn --workers 1 --bind 0.0.0.0:5000 admin.wsgi:app"
+    )
+
+
+def test_admin_settings_match_wsgi(admin):
+    assert admin["environment"] == {
+        "SECRET_KEY_FILE": "/run/secrets/flask_secret_key",
+        "EVP_KEY_DIR": "/run/secrets/evp_keys",
+        "EVP_AUDIT_ARCHIVE": "/var/lib/evp/audit/checkpoints.jsonl",
+    }
+
+    wsgi = (REPO_ROOT / "admin" / "wsgi.py").read_text(encoding="utf-8")
+
+    for setting in ("SECRET_KEY_FILE", "EVP_IDENTITY_DB_URL",
+                    "EVP_AUDIT_DB_URL", "EVP_AUDIT_ARCHIVE", "EVP_KEY_DIR"):
+        assert setting in wsgi
+
+
+def test_admin_database_urls_are_built_from_secret_files(admin):
+    script = admin_script(admin)
+
+    assert 'identity_pw="$$(cat /run/secrets/admin_db_password)"' in script
+    assert 'audit_pw="$$(cat /run/secrets/audit_db_password)"' in script
+    assert (
+        'export EVP_IDENTITY_DB_URL="mysql+pymysql://admin_identity:'
+        '$${identity_pw}@db-identity:3306/identity_db"' in script
+    )
+    assert (
+        'export EVP_AUDIT_DB_URL="mysql+pymysql://audit_writer:'
+        '$${audit_pw}@db-audit:3306/audit_db"' in script
+    )
+    assert "unset identity_pw audit_pw" in script
+
+    for key in ("EVP_IDENTITY_DB_URL", "EVP_AUDIT_DB_URL"):
+        assert key not in admin["environment"]
+
+
+def test_admin_never_uses_a_root_database_account(admin):
+    script = admin_script(admin)
+
+    assert "root" not in script
+    assert "db_identity_root_password" not in str(admin["secrets"])
+    assert "db_audit_root_password" not in str(admin["secrets"])
+
+
+def test_admin_mounts_only_its_own_keys(admin, compose):
+    targets = {}
+
+    for secret in admin["secrets"]:
+        if isinstance(secret, dict):
+            targets[secret["target"]] = secret["source"]
+
+    key_dir = admin["environment"]["EVP_KEY_DIR"]
+
+    assert {
+        target.rsplit("/", 1)[1] for target in targets
+    } == ADMIN_KEY_FILES
+    assert all(target.startswith(key_dir + "/") for target in targets)
+    assert (
+        compose["secrets"][targets[f"{key_dir}/manifest.json"]]["file"]
+        == "./secrets/keys/manifest-admin-audit.json"
+    )
+
+    text = str(admin["secrets"])
+    for other in ("ballot_sign", "results_sign", "election_seal"):
+        assert other not in text
+
+
+def test_admin_plain_secrets(admin):
+    plain = {secret for secret in admin["secrets"] if isinstance(secret, str)}
+
+    assert plain == {"flask_secret_key", "admin_db_password",
+                     "audit_db_password"}
+
+
+def test_admin_archive_has_its_own_named_volume(admin, compose, services):
+    assert admin["volumes"] == ["audit_archive:/var/lib/evp/audit"]
+    assert "audit_archive" in compose["volumes"]
+    assert admin["environment"]["EVP_AUDIT_ARCHIVE"].startswith(
+        "/var/lib/evp/audit/"
+    )
+
+    for name, service in services.items():
+        if name != "admin-audit":
+            assert "audit_archive" not in str(service.get("volumes", [])), name
+
+
+def test_admin_waits_for_healthy_databases(admin):
+    assert admin["depends_on"] == {
+        "db-identity": {"condition": "service_healthy"},
+        "db-audit": {"condition": "service_healthy"},
+    }
+
+
+def test_admin_networks(admin):
+    assert networks_of(admin) == {"edge", "identity_net", "audit_net"}

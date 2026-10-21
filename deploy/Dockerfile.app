@@ -33,6 +33,7 @@ COPY admin/ ./admin/
 COPY audit/ ./audit/
 COPY crypto_agility/ ./crypto_agility/
 
-RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin evpuser
+RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin evpuser \
+    && install -d -o evpuser -g evpuser -m 700 /var/lib/evp/audit
 
 USER evpuser

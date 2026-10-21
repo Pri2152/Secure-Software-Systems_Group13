@@ -239,3 +239,12 @@ def test_entrypoint_status_matches_repository():
         assert cells[3] == ("Yes" if exists else "No"), (
             f"{compartment}: update the 'On main yet' column"
         )
+
+
+def test_audit_archive_folder_is_writable_by_runtime_user_only():
+    # The admin-audit checkpoint volume starts from this folder, so a
+    # fresh named volume is owned by evpuser and closed to others.
+    assert any(
+        "install -d -o evpuser -g evpuser -m 700 /var/lib/evp/audit" in command
+        for command in arguments_for("RUN")
+    )

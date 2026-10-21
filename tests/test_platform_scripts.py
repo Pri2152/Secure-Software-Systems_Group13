@@ -31,6 +31,7 @@ GENERATED = {
     "db_ballot_root_password": r"[A-Za-z0-9_-]{43}",
     "db_audit_root_password": r"[A-Za-z0-9_-]{43}",
     "voter_access_db_password": r"[A-Za-z0-9_-]{43}",
+    "admin_db_password": r"[A-Za-z0-9_-]{43}",
     "ballot_db_password": r"[A-Za-z0-9_-]{43}",
     "audit_db_password": r"[A-Za-z0-9_-]{43}",
     "tally_db_password": r"[A-Za-z0-9_-]{43}",
@@ -38,6 +39,7 @@ GENERATED = {
 
 KEY_FILES = (
     "manifest.json",
+    "manifest-admin-audit.json",
     "pii_key_v1",
     "audit_hmac_v1",
     "audit_sign_v1",
@@ -234,7 +236,7 @@ def test_secret_values_are_never_printed(sandbox):
         assert value not in result.stderr
 
     for name, value in read_keys(sandbox).items():
-        if name == "manifest.json":
+        if name.startswith("manifest"):
             continue
 
         body = value.strip().splitlines()[len(value.strip().splitlines()) // 2]
@@ -340,7 +342,7 @@ def test_force_replaces_every_secret(sandbox):
     keys_after = read_keys(sandbox)
 
     for name in KEY_FILES:
-        if name != "manifest.json":
+        if not name.startswith("manifest"):
             assert keys_after[name] != keys_before[name], name
 
     assert keys_after["pii_key_v1"].strip() == after["pii_key_v1"]
@@ -484,8 +486,45 @@ def test_manifest_has_one_current_key_per_slot(sandbox):
     assert len(slots) == len(set(slots))
     assert all(entry["current"] is True for entry in manifest["keys"])
     assert sorted(entry["file"] for entry in manifest["keys"]) == sorted(
-        name for name in KEY_FILES if name != "manifest.json"
+        name for name in KEY_FILES if not name.startswith("manifest")
     )
+
+
+ADMIN_AUDIT_KEYS = {"pii_key_v1", "audit_hmac_v1", "audit_sign_v1"}
+
+
+def test_admin_audit_manifest_lists_only_its_keys(sandbox):
+    run_script(sandbox)
+    manifest = json.loads(read_keys(sandbox)["manifest-admin-audit.json"])
+    full = json.loads(read_keys(sandbox)["manifest.json"])
+
+    assert {entry["file"] for entry in manifest["keys"]} == ADMIN_AUDIT_KEYS
+    assert all(entry in full["keys"] for entry in manifest["keys"])
+
+
+def test_admin_audit_keys_load_on_their_own(sandbox, tmp_path):
+    # Mirrors the Compose mounts: its manifest as manifest.json plus
+    # only its three key files, nothing else.
+    from crypto_agility import build_service
+    from crypto_agility.errors import CryptoError
+
+    run_script(sandbox)
+    keys_dir = sandbox / "deploy" / "secrets" / "keys"
+    mounted = tmp_path / "evp_keys"
+    mounted.mkdir()
+    shutil.copy(keys_dir / "manifest-admin-audit.json", mounted / "manifest.json")
+    for name in ADMIN_AUDIT_KEYS:
+        shutil.copy(keys_dir / name, mounted / name)
+
+    service = build_service(key_dir=str(mounted))
+    data = b"checkpoint"
+
+    assert service.decrypt("pii", service.encrypt("pii", data)) == data
+    assert service.verify_mac("audit", data, service.mac("audit", data))
+    assert service.verify("audit", data, service.sign("audit", data))
+
+    with pytest.raises(CryptoError):
+        service.seal("election", data)
 
 
 def test_db_password_files_match_roles_sql():

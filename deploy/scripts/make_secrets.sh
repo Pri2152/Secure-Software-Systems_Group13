@@ -46,7 +46,7 @@ KEY_PYTHON="${EVP_KEY_PYTHON:-$REPO_ROOT/.venv/bin/python}"
 
 # Name and generator for each secret. Generators are Python
 # expressions evaluated with the secrets module imported.
-SECRET_NAMES="flask_secret_key pii_key_v1 db_identity_root_password db_ballot_root_password db_audit_root_password voter_access_db_password ballot_db_password audit_db_password tally_db_password"
+SECRET_NAMES="flask_secret_key pii_key_v1 db_identity_root_password db_ballot_root_password db_audit_root_password voter_access_db_password admin_db_password ballot_db_password audit_db_password tally_db_password"
 
 generator_for() {
     case "$1" in

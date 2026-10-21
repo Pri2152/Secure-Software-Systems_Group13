@@ -19,6 +19,8 @@ Security controls:
   written through a temporary file and renamed into place
 - Refuses a symbolic-linked key folder
 - Never prints key material; only file names
+- A smaller manifest per compartment lists only the keys that
+  compartment uses, so it mounts nothing else (SR-20)
 
 Local academic prototype.
 """
@@ -86,14 +88,32 @@ KEYS = (
 )
 
 
+# Keys each compartment mounts, with its own manifest file. The
+# compartment mounts that file as manifest.json.
+COMPARTMENT_KEYS = {
+    "admin-audit": (
+        "pii.aes-256-gcm.v1",
+        "audit.hmac-sha256.v1",
+        "audit.ed25519.v1",
+    ),
+}
+
+
+def compartment_manifest_name(compartment):
+    return f"manifest-{compartment}.json"
+
+
 class KeySetupError(Exception):
     pass
 
 
-def manifest_text():
+def manifest_text(kids=None):
     entries = []
 
     for kid, purpose, family, alg, name, encoding, _ in KEYS:
+        if kids is not None and kid not in kids:
+            continue
+
         entry = {
             "kid": kid,
             "purpose": purpose,
@@ -176,6 +196,12 @@ def make_keys(secrets_dir, force=False, report=print):
 
     files = [(name, generator) for *_, name, _, generator in KEYS]
     files.append((MANIFEST_NAME, manifest_text))
+
+    for compartment, kids in COMPARTMENT_KEYS.items():
+        files.append((
+            compartment_manifest_name(compartment),
+            lambda kids=kids: manifest_text(kids),
+        ))
 
     for name, generator in files:
         path = key_dir / name

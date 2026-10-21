@@ -2,11 +2,13 @@
 #
 # SR-04 / SR-06 / SR-17 / SR-20: Apply database accounts and triggers.
 #
-# Run once after the stack is up and the apps have created their tables
-# (see deploy/README.md). Safe to re-run, for example after Workstream C's
-# ballot tables exist or after make_secrets.sh --force.
+# Run once after the databases are up (see deploy/README.md). Safe to
+# re-run, for example after Workstream C's ballot tables exist or after
+# make_secrets.sh --force.
 #
 # Security controls:
+# - Workstream B's tables are created as root from B's own models
+#   (schema_sql.py), so no app account needs CREATE, INDEX or ALTER
 # - Least-privilege accounts from deploy/db/roles.sql, each applied only
 #   to the MySQL container that holds its database (roles_plan.py)
 # - Service passwords read from deploy/secrets/ and piped to mysql on
@@ -16,7 +18,7 @@
 # - A GRANT whose table does not exist yet is skipped with a warning
 #   instead of failing the whole run
 # - Append-only audit log triggers (SR-17) on db-audit and two-person
-#   rule triggers (SR-06) on db-identity; their tables must exist
+#   rule triggers (SR-06) on db-identity
 # - Everything is checked before anything is applied
 #
 # Usage (from anywhere):
@@ -33,12 +35,15 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 DEPLOY_DIR="$(dirname "$SCRIPT_DIR")"
+REPO_ROOT="$(dirname "$DEPLOY_DIR")"
+APP_PYTHON="${EVP_APP_PYTHON:-$REPO_ROOT/.venv/bin/python}"
 SECRETS_DIR="$DEPLOY_DIR/secrets"
 COMPOSE_FILE="$DEPLOY_DIR/docker-compose.yml"
 ROLES_SQL="$DEPLOY_DIR/db/roles.sql"
 AUDIT_TRIGGERS_SQL="$DEPLOY_DIR/db/audit_triggers.sql"
 DUAL_TRIGGERS_SQL="$DEPLOY_DIR/db/dual_authorisation_triggers.sql"
 PLAN="$SCRIPT_DIR/roles_plan.py"
+SCHEMA="$SCRIPT_DIR/schema_sql.py"
 
 DB_SERVICES="db-identity db-ballot db-audit"
 
@@ -80,8 +85,15 @@ for tool in docker python3; do
     fi
 done
 
+if ! "$APP_PYTHON" -c "import sqlalchemy" > /dev/null 2>&1; then
+    echo "A Python with requirements.txt installed is needed for the schema:" >&2
+    echo "create .venv from requirements.txt or set EVP_APP_PYTHON" >&2
+    exit 1
+fi
+
 # 1. Check everything before applying anything.
 python3 "$PLAN" check "$ROLES_SQL" "$SECRETS_DIR"
+schema_tables="$("$APP_PYTHON" "$SCHEMA" tables)"
 
 running="$(docker compose -f "$COMPOSE_FILE" ps --status running --services)"
 
@@ -93,17 +105,13 @@ for service in $DB_SERVICES; do
     fi
 done
 
-if ! table_exists db-audit audit_db audit_log; then
-    echo "audit_db.audit_log does not exist yet: start admin-audit" >&2
-    echo "(--profile full) so it creates its tables, then re-run." >&2
-    exit 1
-fi
-
-if ! table_exists db-identity identity_db pending_operations; then
-    echo "identity_db.pending_operations does not exist yet: start" >&2
-    echo "admin-audit (--profile full) so it creates its tables, then re-run." >&2
-    exit 1
-fi
+# 2. Workstream B's tables, created as root if missing.
+while read -r service database table; do
+    if ! table_exists "$service" "$database" "$table"; then
+        "$APP_PYTHON" "$SCHEMA" create "$table" | mysql_root "$service"
+        echo "Created $database.$table on $service"
+    fi
+done <<< "$schema_tables"
 
 grant_targets="$(python3 "$PLAN" targets "$ROLES_SQL")"
 skipped=""
@@ -115,7 +123,7 @@ while read -r service database table; do
     fi
 done <<< "$grant_targets"
 
-# 2. Accounts and GRANTs, one container at a time. The rendered SQL
+# 3. Accounts and GRANTs, one container at a time. The rendered SQL
 # (with passwords) goes straight from roles_plan.py into mysql.
 for service in $DB_SERVICES; do
     python3 "$PLAN" render "$ROLES_SQL" "$SECRETS_DIR" "$service" "$skipped" \
@@ -124,7 +132,7 @@ for service in $DB_SERVICES; do
     echo "Applied database accounts on $service"
 done
 
-# 3. Triggers (second layer under the GRANTs).
+# 4. Triggers (second layer under the GRANTs).
 mysql_root db-audit < "$AUDIT_TRIGGERS_SQL"
 echo "Applied audit log triggers on db-audit"
 

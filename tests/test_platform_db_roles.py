@@ -20,6 +20,7 @@ ROLES_PATH = (
 
 EXPECTED_USERS = {
     "voter_access",
+    "admin_identity",
     "ballot_writer",
     "audit_writer",
     "tally_reader",
@@ -184,10 +185,46 @@ def test_voter_access_stays_in_identity_db():
             assert "DELETE" not in privileges
 
 
-def test_only_voter_access_reaches_identity_db():
+VOTER_RECORD_TABLES = {
+    "identity_db.enrolment_records",
+    "identity_db.address_records",
+}
+
+STAFF_TABLES = {
+    "identity_db.staff_accounts",
+    "identity_db.staff_elevation_grants",
+    "identity_db.candidates",
+    "identity_db.pending_operations",
+}
+
+
+def test_only_voter_access_reaches_voter_records():
+    for user, _, target, _ in grants():
+        if target in VOTER_RECORD_TABLES:
+            assert user == "voter_access"
+
+
+def test_identity_db_is_only_voter_records_and_staff_tables():
     for user, _, target, _ in grants():
         if target.startswith("identity_db."):
-            assert user == "voter_access"
+            assert user in {"voter_access", "admin_identity"}, user
+            assert target in VOTER_RECORD_TABLES | STAFF_TABLES, target
+
+
+def test_admin_identity_reaches_only_staff_tables():
+    assert {
+        target: privileges
+        for user, privileges, target, _ in grants()
+        if user == "admin_identity"
+    } == {table: {"SELECT", "INSERT", "UPDATE"} for table in STAFF_TABLES}
+
+
+@pytest.mark.parametrize("privilege", ["CREATE", "ALTER", "DROP", "INDEX",
+                                       "TRIGGER", "REFERENCES"])
+def test_no_account_can_change_the_schema(privilege):
+    # Tables are created as root by apply_db_security.sh.
+    for user, privileges, _, _ in grants():
+        assert privilege not in privileges, user
 
 
 def test_passwords_are_environment_placeholders():
