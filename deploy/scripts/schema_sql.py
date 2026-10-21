@@ -1,10 +1,11 @@
 """
-SR-20: MySQL DDL for Workstream B's tables, run as root.
+SR-20: MySQL DDL for the identity and audit tables, run as root.
 
 The app accounts in deploy/db/roles.sql hold data privileges
 only (no CREATE), so apply_db_security.sh creates these tables
 as root before it applies the GRANTs and triggers. The DDL is
-generated from Workstream B's own SQLAlchemy models, so it
+generated from the owners' own SQLAlchemy models (Workstream
+A's records.py, Workstream B's admin and audit models), so it
 always matches the code. Called by apply_db_security.sh; not
 meant to be run directly.
 
@@ -14,8 +15,8 @@ Commands:
 
 Security controls:
 - App accounts never need CREATE, INDEX or ALTER privileges
-- Only the listed Workstream B tables can be rendered; voter
-  record tables (Workstream A) are never created here
+- Only the listed tables can be rendered; ballot tables
+  (Workstream C) are never created here
 - Prints SQL only; holds no passwords or keys
 
 Local academic prototype.
@@ -37,10 +38,13 @@ from admin.models import (  # noqa: E402
     StaffAccount,
 )
 from audit.models import AuditEntry  # noqa: E402
+from records import AddressRecord, EnrolmentRecord  # noqa: E402
 
 
 # (service, database, model) in foreign-key order.
 TABLES = (
+    ("db-identity", "identity_db", EnrolmentRecord),
+    ("db-identity", "identity_db", AddressRecord),
     ("db-identity", "identity_db", StaffAccount),
     ("db-identity", "identity_db", ElevationGrant),
     ("db-identity", "identity_db", Candidate),

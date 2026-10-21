@@ -7,7 +7,8 @@
 # make_secrets.sh --force.
 #
 # Security controls:
-# - Workstream B's tables are created as root from B's own models
+# - The identity and audit tables are created as root from their owners'
+#   models (Workstream A's records.py, Workstream B's admin and audit)
 #   (schema_sql.py), so no app account needs CREATE, INDEX or ALTER
 # - Least-privilege accounts from deploy/db/roles.sql, each applied only
 #   to the MySQL container that holds its database (roles_plan.py)
@@ -105,7 +106,7 @@ for service in $DB_SERVICES; do
     fi
 done
 
-# 2. Workstream B's tables, created as root if missing.
+# 2. Identity and audit tables, created as root if missing.
 while read -r service database table; do
     if ! table_exists "$service" "$database" "$table"; then
         "$APP_PYTHON" "$SCHEMA" create "$table" | mysql_root "$service"

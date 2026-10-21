@@ -57,7 +57,7 @@ Run in this order:
 3. Wait until `db-identity` and `db-audit` show as healthy in `docker compose -f deploy/docker-compose.yml ps`.
 4. `bash deploy/scripts/apply_db_security.sh`
 
-Step 4 creates Workstream B's tables as root (from B's own models), then the least-privilege accounts from `db/roles.sql` on each database container, then the audit log triggers on `db-audit` and the two-person rule triggers on `db-identity`. No app account can create or change tables.
+Step 4 creates the identity and audit tables as root (from Workstream A's and B's own models), then the least-privilege accounts from `db/roles.sql` on each database container, then the audit log triggers on `db-audit` and the two-person rule triggers on `db-identity`. No app account can create or change tables.
 
 `admin-audit` restarts until step 4 has run, because its database accounts do not exist before that; it then starts on its own.
 

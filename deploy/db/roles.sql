@@ -9,8 +9,10 @@
 --   SELECT (to read the last entry and chain the next one) and INSERT,
 --   never UPDATE or DELETE
 -- - The tally service can only read ballots
--- - The staff admin service (admin_identity) reaches only Workstream B's
---   tables, never voter records, and has no DELETE
+-- - The staff admin service (admin_identity) has no DELETE, may change
+--   only enrolment_status on voter enrolment records (dual-authorised
+--   bulk roll updates), and can see only the id column of address
+--   records (needed by its start-up table check), never the address
 -- - No account can CREATE, ALTER or DROP: tables are created as root
 --   by deploy/scripts/apply_db_security.sh
 --
@@ -18,7 +20,7 @@
 -- variables / Docker secrets at init time and are never committed.
 --
 -- Applied by deploy/scripts/apply_db_security.sh, which first creates
--- Workstream B's tables as root: MySQL requires each table named in a
+-- the identity and audit tables as root: MySQL requires each table named in a
 -- table-level GRANT to exist. GRANTs on tables that do not exist yet
 -- are skipped with a warning.
 
@@ -32,13 +34,21 @@ GRANT SELECT, INSERT, UPDATE ON identity_db.enrolment_records TO 'voter_access'@
 GRANT SELECT, UPDATE ON identity_db.address_records TO 'voter_access'@'%';
 
 -- Staff administration (Workstream B, admin-audit): staff accounts,
--- elevation grants, candidates and dual-authorisation operations only.
--- No DELETE: revoked grants and finished operations are kept as history.
+-- elevation grants, candidates and dual-authorisation operations, plus
+-- the voter-record access its code needs (below). No DELETE: revoked
+-- grants and finished operations are kept as history.
 CREATE USER IF NOT EXISTS 'admin_identity'@'%' IDENTIFIED BY '${ADMIN_DB_PASSWORD}';
 GRANT SELECT, INSERT, UPDATE ON identity_db.staff_accounts TO 'admin_identity'@'%';
 GRANT SELECT, INSERT, UPDATE ON identity_db.staff_elevation_grants TO 'admin_identity'@'%';
 GRANT SELECT, INSERT, UPDATE ON identity_db.candidates TO 'admin_identity'@'%';
 GRANT SELECT, INSERT, UPDATE ON identity_db.pending_operations TO 'admin_identity'@'%';
+-- Bulk roll updates (admin/operations.py, admin/execution.py) load whole
+-- enrolment records but change only their status.
+GRANT SELECT, UPDATE (enrolment_status) ON identity_db.enrolment_records TO 'admin_identity'@'%';
+-- Not used by admin code. db.create_all() in admin/wsgi.py checks every
+-- table on the shared db with DESCRIBE, which MySQL refuses on a table
+-- the account has no privilege on. id only: no address text.
+GRANT SELECT (id) ON identity_db.address_records TO 'admin_identity'@'%';
 
 -- Ballot service (Workstream C): cast ballots are never changed or removed.
 CREATE USER IF NOT EXISTS 'ballot_writer'@'%' IDENTIFIED BY '${BALLOT_DB_PASSWORD}';

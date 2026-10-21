@@ -265,6 +265,9 @@ def test_plan_refuses_missing_password_file(secrets_dir):
     "GRANT SELECT ON other_db.t TO 'audit_writer'@'%';",
     "GRANT SELECT ON audit_db.audit_log TO 'stranger'@'%';",
     "GRANT SELECT ON identity_db.address_records TO 'audit_writer'@'%';",
+    "GRANT SELECT, DROP (id) ON audit_db.audit_log TO 'audit_writer'@'%';",
+    "GRANT UPDATE (id; DROP) ON audit_db.audit_log TO 'audit_writer'@'%';",
+    "GRANT SELECT ((id)) ON audit_db.audit_log TO 'audit_writer'@'%';",
 ])
 def test_plan_refuses_unexpected_sql(tmp_path, statement):
     plan = load_plan()
@@ -496,22 +499,55 @@ def test_existing_tables_are_not_recreated(sandbox):
         assert "CREATE TABLE" not in sql
 
 
-def test_schema_never_creates_voter_record_tables(sandbox):
+def test_schema_creates_voter_record_tables_as_root(sandbox):
+    result, calls = run_apply(sandbox, tables="")
+
+    assert result.returncode == 0, result.stderr
+
+    created = [
+        (service, re.search(r"CREATE TABLE (\w+)", sql).group(1))
+        for service, sql in applied(calls)
+        if "CREATE TABLE" in sql
+    ]
+
+    assert created[:2] == [
+        ("db-identity", "enrolment_records"),
+        ("db-identity", "address_records"),
+    ]
+
+    # Every identity GRANT then applies; only ballot ones are skipped.
+    identity = [sql for service, sql in applied(calls)
+                if service == "db-identity" and "GRANT" in sql][0]
+
+    assert (
+        "GRANT SELECT, UPDATE (enrolment_status) ON "
+        "identity_db.enrolment_records TO 'admin_identity'@'%';" in identity
+    )
+    assert (
+        "GRANT SELECT (id) ON identity_db.address_records "
+        "TO 'admin_identity'@'%';" in identity
+    )
+    assert "identity_db" not in result.stderr
+
+
+def test_schema_never_creates_ballot_tables(sandbox):
     _, calls = run_apply(sandbox, tables="")
 
     created = " ".join(sql for _, sql in applied(calls))
 
-    assert "CREATE TABLE enrolment_records" not in created
-    assert "CREATE TABLE address_records" not in created
+    assert "CREATE TABLE ballots" not in created
+    assert "CREATE TABLE ballot_keys" not in created
 
 
-def test_schema_tables_match_workstream_b_models():
+def test_schema_tables_match_owner_models():
     result = subprocess.run(
         [sys.executable, str(SCHEMA_PATH), "tables"],
         capture_output=True, text=True, check=True,
     )
 
-    assert result.stdout.split("\n")[:5] == [
+    assert result.stdout.split("\n")[:7] == [
+        "db-identity identity_db enrolment_records",
+        "db-identity identity_db address_records",
         "db-identity identity_db staff_accounts",
         "db-identity identity_db staff_elevation_grants",
         "db-identity identity_db candidates",
@@ -542,7 +578,7 @@ def test_schema_sql_is_mysql_ddl_only():
 
 def test_schema_refuses_unknown_tables():
     result = subprocess.run(
-        [sys.executable, str(SCHEMA_PATH), "create", "enrolment_records"],
+        [sys.executable, str(SCHEMA_PATH), "create", "ballots"],
         capture_output=True, text=True,
     )
 
@@ -577,3 +613,26 @@ def test_unknown_argument_is_rejected(sandbox):
     )
 
     assert result.returncode == 2
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("SELECT", "SELECT"),
+    ("select, insert", "SELECT, INSERT"),
+    ("SELECT, UPDATE (enrolment_status)", "SELECT, UPDATE (enrolment_status)"),
+    ("SELECT (id, owner_voter_id), UPDATE", "SELECT (id, owner_voter_id), UPDATE"),
+])
+def test_plan_keeps_column_privileges(text, expected):
+    plan = load_plan()
+
+    assert plan.format_privileges(plan.parse_privileges(text)) == expected
+
+
+@pytest.mark.parametrize("text", [
+    "ALL", "SELECT (id); DROP", "SELECT ((id))", "UPDATE (a b)",
+    "GRANT OPTION", "DELETE (id), CREATE", "SELECT (`id`)",
+])
+def test_plan_refuses_bad_privilege_lists(text):
+    plan = load_plan()
+
+    with pytest.raises(plan.PlanError):
+        plan.parse_privileges(text)

@@ -19,8 +19,9 @@ Security controls:
   database (compartment separation)
 - Only CREATE DATABASE, CREATE USER, GRANT and FLUSH
   PRIVILEGES statements are accepted, and GRANTs only of
-  SELECT, INSERT, UPDATE or DELETE on one named table;
-  anything else in roles.sql is refused
+  SELECT, INSERT, UPDATE or DELETE on one named table,
+  optionally limited to named columns; anything else in
+  roles.sql is refused
 - Passwords come from deploy/secrets/<placeholder in lower
   case> and must be at least 32 URL-safe characters, so
   they cannot break out of the SQL string
@@ -45,6 +46,9 @@ SERVICES = {
 NAME = r"[a-z_][a-z0-9_]{0,63}"
 PASSWORD_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,256}")
 ALLOWED_PRIVILEGES = frozenset({"SELECT", "INSERT", "UPDATE", "DELETE"})
+PRIVILEGE_PATTERN = re.compile(
+    rf"(?P<name>[A-Z]+)(?: \((?P<columns>{NAME}(?:, {NAME})*)\))?"
+)
 
 CREATE_DATABASE = re.compile(
     rf"CREATE DATABASE IF NOT EXISTS (?P<db>{NAME})", re.IGNORECASE
@@ -55,7 +59,7 @@ CREATE_USER = re.compile(
     re.IGNORECASE,
 )
 GRANT = re.compile(
-    rf"GRANT (?P<privileges>[A-Z, ]+) ON (?P<db>{NAME})\.(?P<table>{NAME}) "
+    rf"GRANT (?P<privileges>[A-Za-z_, ()]+) ON (?P<db>{NAME})\.(?P<table>{NAME}) "
     rf"TO '(?P<user>{NAME})'@'(?P<host>[%a-z0-9.]+)'",
     re.IGNORECASE,
 )
@@ -64,6 +68,64 @@ FLUSH = re.compile(r"FLUSH PRIVILEGES", re.IGNORECASE)
 
 class PlanError(Exception):
     pass
+
+
+def parse_privileges(text):
+    """
+    Split "SELECT, UPDATE (a, b)" into [("SELECT", ()),
+    ("UPDATE", ("a", "b"))]. Only allowed privileges and
+    plain column names are accepted.
+    """
+
+    parts, depth, current = [], 0, ""
+
+    for character in text:
+        depth += {"(": 1, ")": -1}.get(character, 0)
+
+        if depth not in (0, 1):
+            raise PlanError("GRANT privilege list is malformed")
+
+        if character == "," and depth == 0:
+            parts.append(current)
+            current = ""
+        else:
+            current += character
+
+    parts.append(current)
+    privileges = []
+
+    for part in parts:
+        normalised = (
+            _normalise(part) if "(" in part else part.strip().upper()
+        )
+        match = PRIVILEGE_PATTERN.fullmatch(normalised)
+
+        if match is None or match["name"] not in ALLOWED_PRIVILEGES:
+            raise PlanError("GRANT uses a privilege that is not allowed")
+
+        columns = tuple(
+            column.strip() for column in (match["columns"] or "").split(",")
+            if column.strip()
+        )
+        privileges.append((match["name"], columns))
+
+    return privileges
+
+
+def _normalise(part):
+    name, _, columns = part.partition("(")
+    columns = ", ".join(
+        column.strip().lower() for column in columns.rstrip(" )").split(",")
+    )
+
+    return f"{name.strip().upper()} ({columns})"
+
+
+def format_privileges(privileges):
+    return ", ".join(
+        f"{name} ({', '.join(columns)})" if columns else name
+        for name, columns in privileges
+    )
 
 
 def statements(text):
@@ -92,11 +154,7 @@ def parse(roles_path):
                 raise PlanError(f"Unknown database in GRANT: {match['db']}")
             if match["user"] not in users:
                 raise PlanError(f"GRANT for unknown user: {match['user']}")
-            privileges = {
-                part.strip().upper() for part in match["privileges"].split(",")
-            }
-            if not privileges <= ALLOWED_PRIVILEGES:
-                raise PlanError("GRANT uses a privilege that is not allowed")
+            parse_privileges(match["privileges"])
             grants.append(match)
             continue
 
@@ -180,9 +238,7 @@ def render(roles_path, secrets_dir, service, skip=""):
         if f"{grant['db']}.{grant['table']}" in skipped:
             continue
 
-        privileges = ", ".join(
-            part.strip().upper() for part in grant["privileges"].split(",")
-        )
+        privileges = format_privileges(parse_privileges(grant["privileges"]))
         lines.append(
             f"GRANT {privileges} ON {grant['db']}.{grant['table']} "
             f"TO '{grant['user']}'@'{grant['host']}';"

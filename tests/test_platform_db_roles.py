@@ -61,9 +61,13 @@ def grants():
         match = GRANT_PATTERN.fullmatch(statement)
         assert match, f"Unparsed GRANT: {statement}"
 
+        # A column-level privilege such as "UPDATE (status)" counts as
+        # UPDATE, so the checks below cannot be bypassed with columns.
         privileges = {
             privilege.strip().upper()
-            for privilege in match["privileges"].split(",")
+            for privilege in re.sub(
+                r"\([^)]*\)", "", match["privileges"]
+            ).split(",")
         }
 
         found.append((
@@ -198,10 +202,56 @@ STAFF_TABLES = {
 }
 
 
-def test_only_voter_access_reaches_voter_records():
+def column_grants(user, target):
+    """{"SELECT": None or {columns}, ...} for one user and table."""
+
+    found = {}
+
+    for statement in statements():
+        match = GRANT_PATTERN.fullmatch(statement)
+
+        if not match or match["user"] != user or (
+            match["target"].replace("`", "").lower() != target
+        ):
+            continue
+
+        for name, columns in re.findall(
+            r"([A-Za-z]+)\s*(?:\(([^)]*)\))?", match["privileges"]
+        ):
+            found[name.upper()] = (
+                {column.strip() for column in columns.split(",")}
+                if columns else None
+            )
+
+    return found
+
+
+def test_only_voter_access_and_admin_reach_voter_records():
     for user, _, target, _ in grants():
         if target in VOTER_RECORD_TABLES:
-            assert user == "voter_access"
+            assert user in {"voter_access", "admin_identity"}, user
+
+
+def test_parser_counts_column_privileges():
+    # "UPDATE (enrolment_status)" must count as UPDATE in grants().
+    assert privileges_for(
+        "admin_identity", "identity_db.enrolment_records"
+    ) == {"SELECT", "UPDATE"}
+
+
+def test_admin_can_change_only_enrolment_status():
+    # Bulk roll updates (admin/execution.py) load whole records and
+    # change only enrolment_status.
+    assert column_grants(
+        "admin_identity", "identity_db.enrolment_records"
+    ) == {"SELECT": None, "UPDATE": {"enrolment_status"}}
+
+
+def test_admin_sees_only_address_record_ids():
+    # Only for db.create_all()'s DESCRIBE check; never address text.
+    assert column_grants(
+        "admin_identity", "identity_db.address_records"
+    ) == {"SELECT": {"id"}}
 
 
 def test_identity_db_is_only_voter_records_and_staff_tables():
@@ -211,12 +261,22 @@ def test_identity_db_is_only_voter_records_and_staff_tables():
             assert target in VOTER_RECORD_TABLES | STAFF_TABLES, target
 
 
-def test_admin_identity_reaches_only_staff_tables():
+def test_admin_identity_grants_are_exactly_what_admin_code_uses():
     assert {
         target: privileges
         for user, privileges, target, _ in grants()
         if user == "admin_identity"
-    } == {table: {"SELECT", "INSERT", "UPDATE"} for table in STAFF_TABLES}
+    } == {
+        **{table: {"SELECT", "INSERT", "UPDATE"} for table in STAFF_TABLES},
+        "identity_db.enrolment_records": {"SELECT", "UPDATE"},
+        "identity_db.address_records": {"SELECT"},
+    }
+
+
+def test_no_account_can_delete_in_identity_db():
+    for user, privileges, target, _ in grants():
+        if target.startswith("identity_db."):
+            assert "DELETE" not in privileges, user
 
 
 @pytest.mark.parametrize("privilege", ["CREATE", "ALTER", "DROP", "INDEX",
