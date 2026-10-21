@@ -29,6 +29,9 @@ RUN pip install --no-cache-dir -r requirements.txt gunicorn==26.2.0
 # folder here when it reaches main (admin/, ballot/, ...).
 COPY *.py ./
 COPY platform_security/ ./platform_security/
+COPY admin/ ./admin/
+COPY audit/ ./audit/
+COPY crypto_agility/ ./crypto_agility/
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin evpuser
 

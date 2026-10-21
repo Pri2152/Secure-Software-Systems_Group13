@@ -165,6 +165,11 @@ def test_application_code_is_copied():
     assert "platform_security/" in sources
 
 
+@pytest.mark.parametrize("folder", ["admin", "audit", "crypto_agility"])
+def test_workstream_b_packages_are_copied(folder):
+    assert f"{folder}/ ./{folder}/" in arguments_for("COPY")
+
+
 # .dockerignore
 
 def dockerignore_rules():

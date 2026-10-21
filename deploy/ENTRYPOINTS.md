@@ -7,12 +7,12 @@ The image has no default command. Each Compose service sets its own
 | Compartment | Entrypoint file | Gunicorn target | Owner | On `main` yet |
 |---|---|---|---|---|
 | voter-access | `gateway_runtime.py` | `gateway_runtime:application` | Workstream A | Yes |
-| admin-audit | `admin/wsgi.py` | `admin.wsgi:app` | Workstream B | No |
+| admin-audit | `admin/wsgi.py` | `admin.wsgi:app` | Workstream B | Yes |
 | ballot | `ballot/wsgi.py` | `ballot.wsgi:app` | Workstream C | No |
 | tally | `verification/wsgi.py` | `verification.wsgi:app` | Workstream D | No |
 | results-consumer | `results_consumer/wsgi.py` | `results_consumer.wsgi:app` | Workstream D | No |
 
-Checked against `origin/main` at `3057aa7`. `tests/test_platform_dockerfile.py`
+Checked against `origin/main` at `90f4968`. `tests/test_platform_dockerfile.py`
 fails if the "On `main` yet" column no longer matches the files in the repository.
 
 ## Notes for owners
