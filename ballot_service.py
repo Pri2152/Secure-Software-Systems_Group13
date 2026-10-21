@@ -14,8 +14,31 @@ from ballot_models import VotingEligibility
 from records import EnrolmentRecord, db
 
 
+PROTOTYPE_DIVISION_STATES = {
+    "Melbourne": "VIC",
+}
+
+
 class EligibilityError(Exception):
     pass
+
+
+def validate_ballot_assignment(eligibility_record):
+    """
+    Check that the stored division and state match.
+    """
+
+    expected_state = PROTOTYPE_DIVISION_STATES.get(
+        eligibility_record.electoral_division
+    )
+
+    if (
+        expected_state is None
+        or eligibility_record.state_code != expected_state
+    ):
+        raise EligibilityError(
+            "Invalid electoral assignment"
+        )
 
 
 def get_voting_eligibility(voter_id, election_id):
@@ -67,6 +90,8 @@ def get_voting_eligibility(voter_id, election_id):
         raise EligibilityError(
             "Vote already accepted"
         )
+
+    validate_ballot_assignment(record)
 
     return record
 

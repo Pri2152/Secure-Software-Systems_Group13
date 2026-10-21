@@ -12,6 +12,7 @@ from ballot_models import VotingEligibility
 from ballot_service import (
     EligibilityError,
     get_voting_eligibility,
+    validate_ballot_assignment,
 )
 from records import EnrolmentRecord, db
 
@@ -91,6 +92,34 @@ def test_eligible_voter_is_returned(db_app):
     assert record.voter_id == "voter-001"
     assert record.eligible is True
     assert record.has_voted is False
+def test_valid_ballot_assignment_is_allowed(db_app):
+    record = add_eligibility()
+
+    validate_ballot_assignment(record)
+
+
+def test_invalid_ballot_assignment_is_rejected(db_app):
+    record = add_eligibility()
+    record.state_code = "NSW"
+
+    with pytest.raises(
+        EligibilityError,
+        match="Invalid electoral assignment",
+    ):
+        validate_ballot_assignment(record)
+def test_eligibility_rejects_invalid_assignment(db_app):
+    record = add_eligibility()
+    record.state_code = "NSW"
+    db.session.commit()
+
+    with pytest.raises(
+        EligibilityError,
+        match="Invalid electoral assignment",
+    ):
+        get_voting_eligibility(
+            "voter-001",
+            "election-2026",
+        )
 
 
 def test_missing_eligibility_is_rejected(db_app):
