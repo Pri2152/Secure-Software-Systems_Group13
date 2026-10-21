@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
 
+from ballot_confirmation import ConfirmationGenerationError, generate_confirmation_reference
 from ballot_models import BallotCredential
 from ballot_service import EligibilityError, get_voting_eligibility
 from ballot_service import _claim_eligibility, _validate_ballot
@@ -79,7 +80,8 @@ def accept_ballot_with_credential(
     """
     Accept without caller-supplied identity; commit all three changes together.
 
-    No receipt or ballot ID is returned. Owns the current session transaction.
+    Returns only an ephemeral confirmation after commit; never a ballot ID.
+    Owns the current session transaction.
     """
     try:
         verifier = credential_verifier(credential)
@@ -109,8 +111,13 @@ def accept_ballot_with_credential(
         store_anonymous_ballot(
             record.election_id, record.electoral_division, encrypted_ballot_json
         )
+        confirmation = generate_confirmation_reference()
         db.session.commit()
-    except (EligibilityError, CredentialError, CryptoError, SQLAlchemyError):
+        return confirmation
+    except (
+        EligibilityError, CredentialError, CryptoError, SQLAlchemyError,
+        ConfirmationGenerationError,
+    ):
         db.session.rollback()
         raise CredentialError("Credential authorisation failed") from None
     except Exception:

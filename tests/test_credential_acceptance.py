@@ -6,6 +6,7 @@ import secrets
 import pytest
 
 from admin.candidates import add_draft_candidate
+from ballot_confirmation import is_confirmation_reference
 from ballot_credentials import CredentialError, accept_ballot_with_credential
 from ballot_models import AnonymousBallot, BallotCredential, VotingEligibility
 from records import EnrolmentRecord, db
@@ -42,7 +43,7 @@ def assert_state(voted=False, ballots=0, credentials=1):
 
 def test_anonymous_acceptance_and_replay(credential_ballot):
     credential, candidate_id = credential_ballot
-    assert submit(credential, candidate_id) is None
+    assert is_confirmation_reference(submit(credential, candidate_id))
     assert_state(True, 1, 0)
     with pytest.raises(CredentialError, match="^Credential authorisation failed$"):
         submit(credential, candidate_id)
