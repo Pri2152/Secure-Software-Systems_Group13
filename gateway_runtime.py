@@ -25,7 +25,7 @@ from auth import hash_password
 from login_flow import LoginCoordinator, VoterRecord
 from mission_access import MissionAccessPolicy
 from records import db, EnrolmentRecord, AddressRecord
-
+from ballot_models import VotingEligibility
 
 REGISTRY_PATH = Path(
     "/run/evp/registered_fingerprints.txt"
@@ -155,7 +155,7 @@ def configure_local_gateway():
         LOGIN_COORDINATOR=coordinator,
     )
 
-    # Synthetic in-memory data for SR-05 demonstrations.
+    # Synthetic in-memory data for SR-03 and SR-05 demonstrations.
     with app.app_context():
         db.create_all()
 
@@ -170,6 +170,14 @@ def configure_local_gateway():
                 id=801,
                 owner_voter_id=account_id,
                 address_text="Synthetic Test Address",
+            ),
+            VotingEligibility(
+                voter_id=account_id,
+                election_id="election-2026",
+                electoral_division="Melbourne",
+                state_code="VIC",
+                eligible=True,
+                has_voted=False,
             ),
         ])
 
