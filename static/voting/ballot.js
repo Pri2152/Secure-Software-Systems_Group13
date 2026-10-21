@@ -8,6 +8,7 @@
   const button = form.querySelector("button");
   let credential = null;
   let busy = false;
+  let departed = false;
 
   const post = (path, body) => fetch(path, {
     method: "POST",
@@ -28,10 +29,13 @@
       const issued = await post("/vote/credentials", {});
       if (!issued.ok) throw new Error();
       credential = (await issued.json()).credential;
+      if (departed) return;
       const response = await post(form.action, {credential, candidate_id: candidateId});
       credential = null;
+      if (departed) return;
       if (!response.ok) throw new Error();
       const result = await response.json();
+      if (departed) return;
       if (result.status !== "accepted" || !/^conf_[A-Za-z0-9_-]{32}$/.test(result.confirmation_reference)) {
         throw new Error();
       }
@@ -44,7 +48,7 @@
       confirmation.textContent = "Confirmation: " + result.confirmation_reference;
       root.append(title, confirmation);
     } catch (_) {
-      error.textContent = "Your request could not be completed. If the connection was lost, acceptance may already have occurred. Sign in again to check whether voting is available.";
+      if (!departed) error.textContent = "Your request could not be completed. If the connection was lost, acceptance may already have occurred. Sign in again to check whether voting is available.";
     } finally {
       credential = null;
       candidateId = null;
@@ -54,6 +58,7 @@
   });
 
   window.addEventListener("pagehide", () => {
+    departed = true;
     credential = null;
     form.reset();
     root.replaceChildren();

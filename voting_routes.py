@@ -2,22 +2,35 @@
 
 from flask import Blueprint, current_app, jsonify, render_template, request, session
 from flask_wtf.csrf import CSRFError
-from werkzeug.exceptions import RequestEntityTooLarge
+from werkzeug.exceptions import BadRequest, RequestEntityTooLarge
 
 from ballot_credentials import (
     CredentialError, accept_ballot_with_credential, issue_ballot_credential,
 )
 from records import db
 from ballot_service import EligibilityError, get_ballot_candidates, get_voting_eligibility
+from ballot_protection import parse_json
 
 
 WEB_BALLOT_PAYLOAD = '{"format":"single-choice-web-v1"}'
+
+
+def json_body():
+    try:
+        return parse_json(request.get_data(cache=False))
+    except (ValueError, TypeError):
+        raise BadRequest() from None
 
 
 def create_voting_blueprint(require_active_session):
     bp = Blueprint("voting", __name__, url_prefix="/vote",
                    template_folder="templates", static_folder="static/voting",
                    static_url_path="/assets")
+
+    @bp.before_request
+    def reject_query_handoff():
+        if request.args:
+            return jsonify(error="Invalid request"), 400
 
     @bp.after_request
     def private_response(response):
@@ -50,6 +63,7 @@ def create_voting_blueprint(require_active_session):
             return render_template("voting/unavailable.html"), 503
 
     @bp.errorhandler(CSRFError)
+    @bp.errorhandler(BadRequest)
     def csrf_failure(error):
         return jsonify(error="Invalid request"), 400
 
@@ -62,7 +76,7 @@ def create_voting_blueprint(require_active_session):
     def credentials():
         if not request.is_json:
             return jsonify(error="JSON request required"), 415
-        data = request.get_json(silent=True)
+        data = json_body()
         if not isinstance(data, dict) or data:
             return jsonify(error="Invalid request"), 400
         try:
@@ -81,7 +95,7 @@ def create_voting_blueprint(require_active_session):
         # CSRF remains enabled; identity is never an acceptance argument.
         if not request.is_json:
             return jsonify(error="JSON request required"), 415
-        data = request.get_json(silent=True)
+        data = json_body()
         if (
             not isinstance(data, dict) or set(data) != {"credential", "candidate_id"}
             or not isinstance(data["credential"], str) or len(data["credential"]) != 43

@@ -26,6 +26,7 @@ from login_flow import LoginCoordinator, VoterRecord
 from mission_access import MissionAccessPolicy
 from records import db, EnrolmentRecord, AddressRecord
 from ballot_models import VotingEligibility
+from voting_runtime import configure_voting_demo
 
 REGISTRY_PATH = Path(
     "/run/evp/registered_fingerprints.txt"
@@ -173,7 +174,7 @@ def configure_local_gateway():
             ),
             VotingEligibility(
                 voter_id=account_id,
-                election_id="election-2026",
+                election_id=app.config["VOTING_ELECTION_ID"],
                 electoral_division="Melbourne",
                 state_code="VIC",
                 eligible=True,
@@ -182,6 +183,9 @@ def configure_local_gateway():
         ])
 
         db.session.commit()
+
+    if os.environ.get("EVP_VOTING_DEMO") == "1":
+        configure_voting_demo(app)
 
     return app
 

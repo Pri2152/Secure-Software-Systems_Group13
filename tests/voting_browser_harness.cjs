@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 const source = fs.readFileSync(process.argv[2], "utf8");
 
-async function scenario(failed) {
+async function scenario(failed, hideAt) {
   const handlers = {};
   const requests = [];
   const button = {disabled: false};
@@ -37,7 +37,11 @@ async function scenario(failed) {
     FormData: class { constructor(value) { this.form = value; } get() { return this.form.selection; } },
     fetch: async (path, options) => {
       requests.push({path, options});
-      if (requests.length === 1) return {ok: !failed, json: async () => ({credential: "A".repeat(43)})};
+      if (requests.length === 1) {
+        if (hideAt === "issue") handlers.pagehide();
+        return {ok: !failed, json: async () => ({credential: "A".repeat(43)})};
+      }
+      if (hideAt === "ballot") handlers.pagehide();
       return {ok: true, json: async () => ({
         status: "accepted", confirmation_reference: "conf_" + "B".repeat(32),
         candidate_id: 42, ballot_id: "must-not-display", ciphertext: "must-not-display"
@@ -51,7 +55,7 @@ async function scenario(failed) {
   const pending = handlers.submit({preventDefault() {}});
   await handlers.submit({preventDefault() {}}); // Busy guard must reject a second click.
   await pending;
-  assert.equal(requests.length, failed ? 1 : 2);
+  assert.equal(requests.length, failed || hideAt === "issue" ? 1 : 2);
   assert.deepEqual(JSON.parse(requests[0].options.body), {});
   for (const request of requests) {
     assert.equal(request.options.method, "POST");
@@ -60,14 +64,16 @@ async function scenario(failed) {
     assert.equal(request.options.credentials, "same-origin");
     assert(!request.path.includes("A".repeat(43)));
   }
-  if (!failed) {
+  if (!failed && !hideAt) {
     assert.deepEqual(JSON.parse(requests[1].options.body), {credential: "A".repeat(43), candidate_id: 42});
     assert.deepEqual(root.children.map(child => child.textContent),
                      ["Vote accepted.", "Confirmation: conf_" + "B".repeat(32)]);
     assert.equal(form.selection, null);
-  } else {
+  } else if (failed) {
     assert(error.textContent.includes("could not be completed"));
     assert(!error.textContent.includes("conf_"));
+  } else {
+    assert.deepEqual(root.children, []);
   }
   assert.equal(button.disabled, false);
   handlers.pagehide();
@@ -75,7 +81,12 @@ async function scenario(failed) {
   assert.equal(form.selection, null);
 }
 
-(async () => { await scenario(false); await scenario(true); })().catch(error => {
+(async () => {
+  await scenario(false);
+  await scenario(true);
+  await scenario(false, "issue");
+  await scenario(false, "ballot");
+})().catch(error => {
   process.stderr.write(String(error));
   process.exitCode = 1;
 });
