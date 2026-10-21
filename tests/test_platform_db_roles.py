@@ -3,7 +3,7 @@
 SR-04 / SR-20 static tests for deploy/db/roles.sql.
 
 Checks least-privilege GRANTs per service, the
-insert-only ballot and audit tables, and that no
+insert-only ballot table, the append-only audit log, and that no
 literal password is committed.
 """
 
@@ -68,7 +68,7 @@ def grants():
         found.append((
             match["user"],
             privileges,
-            match["target"].lower(),
+            match["target"].replace("`", "").lower(),
             match["rest"],
         ))
 
@@ -146,12 +146,22 @@ def test_ballot_writer_can_only_add_ballots():
     ) == {"SELECT", "INSERT"}
 
 
-def test_audit_writer_is_insert_only():
+def test_audit_writer_can_only_read_and_append():
+    # SELECT lets Workstream B read the last entry to chain the next.
     assert {
         target: privileges
         for user, privileges, target, _ in grants()
         if user == "audit_writer"
-    } == {"audit_db.audit_log": {"INSERT"}}
+    } == {"audit_db.audit_log": {"SELECT", "INSERT"}}
+
+
+def test_audit_log_can_never_be_changed_or_removed():
+    for user, privileges, target, _ in grants():
+        if target.startswith("audit_db."):
+            assert user == "audit_writer", user
+            assert not privileges & {"UPDATE", "DELETE", "DROP", "ALTER",
+                                     "TRUNCATE", "INDEX", "TRIGGER",
+                                     "REFERENCES", "CREATE"}, privileges
 
 
 def test_tally_is_read_only():
