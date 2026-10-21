@@ -2,6 +2,10 @@
 
 ## Requirement and status
 
+SR-10 follow-up: ballot storage now uses authenticated encryption and a
+hash-linked record/checkpoint. Confirmation generation and non-persistence are
+unchanged; no chain proof is returned. See `SR10_IMPLEMENTATION.md`.
+
 SR-09 service-level prototype complete; GUI/REST presentation enforcement
 remains for final integration.
 

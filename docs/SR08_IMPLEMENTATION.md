@@ -2,6 +2,10 @@
 
 ## Status and requirement
 
+SR-10 follow-up: payload and the validated candidate are now AEAD-protected in
+the ballot domain with an authenticated hash-chain checkpoint; see
+`SR10_IMPLEMENTATION.md`. The earlier storage description below is historical.
+
 Prototype-complete with the physical-store/service-credential limitation below.
 The SR-09 follow-up now returns an ephemeral confirmation after commit; see
 `SR09_IMPLEMENTATION.md`. The controls and baseline below describe the SR-08

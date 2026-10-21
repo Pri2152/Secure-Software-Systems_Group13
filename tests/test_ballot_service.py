@@ -313,23 +313,20 @@ def test_invalid_identifiers_are_rejected(
             election_id,
         )
 def test_anonymous_ballot_can_be_stored(db_app):
-    ballot = AnonymousBallot(
-        ballot_id="ballot-random-001",
-        chain_index=1, previous_hash="sha256:" + "0" * 64,
-        record_hash="sha256:" + "1" * 64,
-        election_id="election-2026",
-        electoral_division="Melbourne",
-        encrypted_ballot_json='{"alg":"aes-256-gcm","ct":"test"}',
-    )
+    from ballot_storage import store_anonymous_ballot
+    from ballot_integrity import verified_candidate_ids_for_tally
 
-    db.session.add(ballot)
+    store_anonymous_ballot("election-2026", "Melbourne", "synthetic opaque content", 7)
     db.session.commit()
-
     saved = AnonymousBallot.query.one()
-
-    assert saved.ballot_id == "ballot-random-001"
+    assert len(bytes.fromhex(saved.ballot_id)) == 32
     assert saved.election_id == "election-2026"
     assert saved.electoral_division == "Melbourne"
+    assert saved.chain_index == 1
+    assert "synthetic opaque content" not in saved.encrypted_ballot_json
+    assert verified_candidate_ids_for_tally("election-2026", "Melbourne") == (7,)
+
+
 def test_anonymous_ballot_has_no_voter_identity_fields(db_app):
     column_names = {
         column.name

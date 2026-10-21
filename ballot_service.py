@@ -125,11 +125,11 @@ def accept_ballot(
     voter_id, election_id, candidate_id, encrypted_ballot_json
 ):
     """
-    Validate a single choice and atomically accept an opaque ballot.
+    Validate a single choice and atomically accept a protected ballot.
 
     voter_id must come from the authenticated server-side identity.
-    The caller supplies an opaque storage payload, not plaintext choices.
-    This SR-03 service does not encrypt or verify that payload (SR-10).
+    SR-10 binds the validated choice to the supplied payload using authenticated
+    encryption and an atomic hash-linked append.
     Owns commit/rollback of the current session; call without pending writes.
     """
 
