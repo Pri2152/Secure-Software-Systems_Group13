@@ -12,6 +12,9 @@ from admin.candidates import (
     final_candidate_list,
 )
 from ballot_models import VotingEligibility
+from ballot_chain import BallotChainError
+from ballot_protection import BallotProtectionError
+from crypto_agility import CryptoError
 from ballot_storage import store_anonymous_ballot
 from records import EnrolmentRecord, db
 
@@ -136,14 +139,14 @@ def accept_ballot(
         )
         _claim_eligibility(record, voter_id, election_id)
         store_anonymous_ballot(
-            election_id, record.electoral_division, encrypted_ballot_json
+            election_id, record.electoral_division, encrypted_ballot_json, candidate_id
         )
         db.session.commit()
 
     except EligibilityError as error:
         db.session.rollback()
         raise BallotAcceptanceError(str(error)) from None
-    except SQLAlchemyError:
+    except (SQLAlchemyError, CryptoError, BallotProtectionError, BallotChainError):
         db.session.rollback()
         raise BallotAcceptanceError("Ballot acceptance failed") from None
     except Exception:

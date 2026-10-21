@@ -15,7 +15,7 @@ from records import EnrolmentRecord, db
 
 @pytest.mark.parametrize("race", range(3))
 def test_concurrent_double_submission_accepts_exactly_one(
-    tmp_path, monkeypatch, race
+    tmp_path, monkeypatch, ballot_crypto, race
 ):
     app = Flask(__name__)
     app.config.update(

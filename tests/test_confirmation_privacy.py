@@ -62,7 +62,7 @@ def test_different_preferences_return_unmapped_nonpreference_references(differen
     db.session.remove()
     ballots = AnonymousBallot.query.all()
     assert len(ballots) == 2
-    assert {ballot.encrypted_ballot_json for ballot in ballots} == set(payloads)
+    assert all(payload not in ballot.encrypted_ballot_json for payload in payloads for ballot in ballots)
     assert all(row.has_voted for row in VotingEligibility.query.all())
     assert BallotCredential.query.count() == 0
     snapshot = str(retained_snapshot())
@@ -90,7 +90,8 @@ def test_actual_schema_has_no_confirmation_column_table_or_foreign_key(credentia
         for foreign_key in schema.get_foreign_keys(table):
             assert "confirm" not in foreign_key["referred_table"].casefold()
     assert {column["name"] for column in schema.get_columns("anonymous_ballots")} == {
-        "ballot_id", "election_id", "electoral_division", "encrypted_ballot_json"
+        "ballot_id", "election_id", "electoral_division", "encrypted_ballot_json",
+        "chain_index", "previous_hash", "record_hash"
     }
 
 
@@ -124,13 +125,14 @@ def test_confirmation_never_crosses_ballot_storage_boundary(different_preference
     received = []
     writer = ballot_credentials.store_anonymous_ballot
 
-    def observe(election_id, division, payload):
-        received.append((election_id, division, payload))
-        writer(election_id, division, payload)
+    def observe(election_id, division, payload, candidate_id):
+        received.append((election_id, division, payload, candidate_id))
+        writer(election_id, division, payload, candidate_id)
 
     monkeypatch.setattr(ballot_credentials, "store_anonymous_ballot", observe)
     references = vote_different_preferences(different_preferences)
     assert received == [
-        ("election-2026", "Melbourne", payload) for payload in different_preferences[2]
+        ("election-2026", "Melbourne", payload, candidate_id)
+        for payload, candidate_id in zip(different_preferences[2], different_preferences[1])
     ]
     assert all(reference not in str(received) for reference in references)

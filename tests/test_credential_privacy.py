@@ -22,7 +22,8 @@ def test_database_schema_has_no_identity_ballot_link(credential_app):
     schema = inspect(db.engine)
     ballot_columns = {column["name"] for column in schema.get_columns("anonymous_ballots")}
     assert ballot_columns == {
-        "ballot_id", "election_id", "electoral_division", "encrypted_ballot_json"
+        "ballot_id", "election_id", "electoral_division", "encrypted_ballot_json",
+        "chain_index", "previous_hash", "record_hash"
     }
     assert schema.get_foreign_keys("anonymous_ballots") == []
     assert {column["name"] for column in schema.get_columns("ballot_credentials")} == {
@@ -69,11 +70,11 @@ def test_retained_state_has_no_individual_join_or_secrets(credential_ballot, cap
         assert secret not in caplog.text
     ballots = retained["anonymous_ballots"]
     for ballot in ballots:
-        assert ballot["encrypted_ballot_json"] == PAYLOAD
+        assert PAYLOAD not in ballot["encrypted_ballot_json"]
         assert "voter-001" not in str(ballot)
         assert "voter-002" not in str(ballot)
         assert ballot["ballot_id"] not in str({
-            name: rows for name, rows in retained.items() if name != "anonymous_ballots"
+            name: rows for name, rows in retained.items() if name not in {"anonymous_ballots", "ballot_chain_state"}
         })
     # Election/division identify a cohort, not a unique individual credential.
     assert set(retained["voting_eligibility"][0]) & set(ballots[0]) == {
@@ -89,15 +90,15 @@ def test_storage_interface_never_receives_identity(credential_ballot, monkeypatc
     calls = []
     original = ballot_credentials.store_anonymous_ballot
 
-    def observe(election_id, electoral_division, encrypted_ballot_json):
-        calls.append((election_id, electoral_division, encrypted_ballot_json))
-        original(election_id, electoral_division, encrypted_ballot_json)
+    def observe(election_id, electoral_division, encrypted_ballot_json, candidate_id):
+        calls.append((election_id, electoral_division, encrypted_ballot_json, candidate_id))
+        original(election_id, electoral_division, encrypted_ballot_json, candidate_id)
 
     monkeypatch.setattr(ballot_credentials, "store_anonymous_ballot", observe)
     submit(*credential_ballot)
-    assert calls == [("election-2026", "Melbourne", PAYLOAD)]
+    assert calls == [("election-2026", "Melbourne", PAYLOAD, credential_ballot[1])]
     assert list(python_inspect.signature(ballot_storage.store_anonymous_ballot).parameters) == [
-        "election_id", "electoral_division", "encrypted_ballot_json"
+        "election_id", "electoral_division", "encrypted_ballot_json", "candidate_id"
     ]
     assert "voter_id" not in python_inspect.signature(
         ballot_credentials.accept_ballot_with_credential

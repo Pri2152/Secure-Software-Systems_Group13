@@ -26,7 +26,7 @@ from admin.models import Candidate
 
 
 @pytest.fixture
-def db_app():
+def db_app(ballot_crypto):
     app = Flask(__name__)
 
     app.config.update(
@@ -315,6 +315,8 @@ def test_invalid_identifiers_are_rejected(
 def test_anonymous_ballot_can_be_stored(db_app):
     ballot = AnonymousBallot(
         ballot_id="ballot-random-001",
+        chain_index=1, previous_hash="sha256:" + "0" * 64,
+        record_hash="sha256:" + "1" * 64,
         election_id="election-2026",
         electoral_division="Melbourne",
         encrypted_ballot_json='{"alg":"aes-256-gcm","ct":"test"}',
@@ -368,7 +370,7 @@ def test_acceptance_commits_ballot_and_status(acceptance_candidate):
     submit(acceptance_candidate)
     assert_acceptance_state(True, 1)
     ballot = AnonymousBallot.query.one()
-    assert ballot.encrypted_ballot_json == OPAQUE_BALLOT
+    assert OPAQUE_BALLOT not in ballot.encrypted_ballot_json
     assert ballot.electoral_division == "Melbourne"
     assert ballot.election_id == "election-2026"
     assert len(bytes.fromhex(ballot.ballot_id)) == 32

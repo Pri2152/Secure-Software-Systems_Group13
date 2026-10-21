@@ -20,7 +20,7 @@ from test_credential_acceptance import PAYLOAD
 
 
 @pytest.fixture
-def contention_app(tmp_path, monkeypatch):
+def contention_app(tmp_path, monkeypatch, ballot_crypto):
     app = Flask(__name__)
     app.config.update(
         TESTING=True,

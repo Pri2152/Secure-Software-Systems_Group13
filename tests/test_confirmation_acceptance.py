@@ -61,7 +61,7 @@ def test_confirmation_uses_separate_randomness_from_internal_ballot_id(
     credential_ballot, monkeypatch
 ):
     import ballot_confirmation
-    import ballot_storage
+    import ballot_chain
 
     calls = []
 
@@ -73,7 +73,7 @@ def test_confirmation_uses_separate_randomness_from_internal_ballot_id(
         calls.append(("confirmation", nbytes))
         return "E" * 32
 
-    monkeypatch.setattr(ballot_storage.secrets, "token_hex", random_ballot_id)
+    monkeypatch.setattr(ballot_chain.secrets, "token_hex", random_ballot_id)
     monkeypatch.setattr(ballot_confirmation.secrets, "token_urlsafe", random_confirmation)
     reference = submit(*credential_ballot)
     assert reference == "conf_" + "E" * 32

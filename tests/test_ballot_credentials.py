@@ -17,7 +17,7 @@ NOW = datetime(2026, 10, 21, tzinfo=timezone.utc)
 
 
 @pytest.fixture
-def credential_app(monkeypatch):
+def credential_app(monkeypatch, ballot_crypto):
     app = Flask(__name__)
     app.config.update(
         TESTING=True, SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",

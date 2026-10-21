@@ -113,3 +113,31 @@ class AnonymousBallot(db.Model):
         db.Text,
         nullable=False
     )
+
+    chain_index = db.Column(db.Integer, nullable=False)
+    previous_hash = db.Column(db.String(71), nullable=False)
+    record_hash = db.Column(db.String(71), nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "election_id", "electoral_division", "chain_index",
+            name="uq_ballot_chain_position",
+        ),
+        db.CheckConstraint("chain_index > 0", name="ck_ballot_positive_index"),
+    )
+
+
+class BallotChainState(db.Model):
+    """Ballot-domain expected count/head, authenticated without identity metadata."""
+
+    __tablename__ = "ballot_chain_state"
+
+    election_id = db.Column(db.String(64), primary_key=True)
+    electoral_division = db.Column(db.String(128), primary_key=True)
+    record_count = db.Column(db.Integer, nullable=False)
+    head_hash = db.Column(db.String(71), nullable=False)
+    checkpoint_json = db.Column(db.Text, nullable=False)
+
+    __table_args__ = (
+        db.CheckConstraint("record_count >= 0", name="ck_chain_nonnegative_count"),
+    )

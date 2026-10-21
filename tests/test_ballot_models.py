@@ -17,7 +17,7 @@ from ballot_models import (
 
 
 @pytest.fixture
-def db_app():
+def db_app(ballot_crypto):
     app = Flask(__name__)
 
     app.config.update(
@@ -143,6 +143,8 @@ def test_different_voters_can_use_same_election(db_app):
 def test_anonymous_ballot_can_be_stored(db_app):
     ballot = AnonymousBallot(
         ballot_id="ballot-random-001",
+        chain_index=1, previous_hash="sha256:" + "0" * 64,
+        record_hash="sha256:" + "1" * 64,
         election_id="election-2026",
         electoral_division="Melbourne",
         encrypted_ballot_json='{"alg":"aes-256-gcm","ct":"test"}',

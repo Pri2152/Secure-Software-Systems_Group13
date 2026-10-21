@@ -9,6 +9,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from ballot_confirmation import ConfirmationGenerationError, generate_confirmation_reference
 from ballot_models import BallotCredential
+from ballot_chain import BallotChainError
+from ballot_protection import BallotProtectionError
 from ballot_service import EligibilityError, get_voting_eligibility
 from ballot_service import _claim_eligibility, _validate_ballot
 from ballot_storage import store_anonymous_ballot
@@ -109,7 +111,7 @@ def accept_ballot_with_credential(
             raise CredentialError("Credential authorisation failed")
 
         store_anonymous_ballot(
-            record.election_id, record.electoral_division, encrypted_ballot_json
+            record.election_id, record.electoral_division, encrypted_ballot_json, candidate_id
         )
         confirmation = generate_confirmation_reference()
         db.session.commit()
@@ -117,6 +119,7 @@ def accept_ballot_with_credential(
     except (
         EligibilityError, CredentialError, CryptoError, SQLAlchemyError,
         ConfirmationGenerationError,
+        BallotProtectionError, BallotChainError,
     ):
         db.session.rollback()
         raise CredentialError("Credential authorisation failed") from None

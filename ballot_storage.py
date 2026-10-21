@@ -1,16 +1,8 @@
 """SR-08 narrow ballot-domain writer; transaction belongs to the caller."""
 
-import secrets
-
-from ballot_models import AnonymousBallot
-from records import db
+from ballot_chain import append_ballot
 
 
-def store_anonymous_ballot(election_id, electoral_division, encrypted_ballot_json):
-    """Stage only ballot-domain data, without identity or credential metadata."""
-    db.session.add(AnonymousBallot(
-        ballot_id=secrets.token_hex(32),
-        election_id=election_id,
-        electoral_division=electoral_division,
-        encrypted_ballot_json=encrypted_ballot_json,
-    ))
+def store_anonymous_ballot(election_id, electoral_division, encrypted_ballot_json, candidate_id):
+    """Protect the validated choice; never receive identity/credential metadata."""
+    append_ballot(election_id, electoral_division, encrypted_ballot_json, candidate_id)
