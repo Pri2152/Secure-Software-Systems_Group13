@@ -193,6 +193,39 @@ services:
     networks:
       - results_net
 
+  # SR-19 drill: a registered polling terminal for the flood test. Its
+  # fixed address is the one listed in nginx/conf.d/evp.conf (geo block),
+  # so the gateway applies terminal limits, not public ones. Starts only
+  # with --profile drill; runs the terminal side of scripts/load_test.py.
+  terminal-sim:
+    image: python:3.11.17-slim
+    profiles: ["drill"]
+    restart: "no"
+    user: "65534:65534"
+    command:
+      - python
+      - /opt/evp/load_test.py
+      - flood
+      - --side
+      - terminal
+      - --target
+      - https://gateway:8443
+      - --insecure
+      - --duration
+      - "60"
+    volumes:
+      - ../scripts/load_test.py:/opt/evp/load_test.py:ro
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - gateway
+    networks:
+      edge:
+        ipv4_address: 172.30.0.20
+
   # deploy/db/roles.sql is applied by deploy/scripts/apply_db_security.sh,
   # which fills its ${...} password placeholders from deploy/secrets/.
   db-identity:

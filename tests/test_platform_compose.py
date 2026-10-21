@@ -58,7 +58,7 @@ def networks_of(service):
 
 def test_expected_services(services):
     assert set(services) == {
-        "gateway", *APP_SERVICES, *DATABASES, "backup",
+        "gateway", *APP_SERVICES, *DATABASES, "backup", "terminal-sim",
     }
 
 
@@ -674,3 +674,40 @@ def test_admin_waits_for_healthy_databases(admin):
 
 def test_admin_networks(admin):
     assert networks_of(admin) == {"edge", "identity_net", "audit_net"}
+
+
+# terminal-sim (SR-19 flood drill)
+
+def test_terminal_sim_only_in_drill_profile(services):
+    assert services["terminal-sim"]["profiles"] == ["drill"]
+
+
+def test_terminal_sim_has_the_registered_terminal_address(services):
+    nginx = (REPO_ROOT / "nginx" / "conf.d" / "evp.conf").read_text()
+    address = services["terminal-sim"]["networks"]["edge"]["ipv4_address"]
+
+    assert f"    {address}/32 1;" in nginx
+    assert set(services["terminal-sim"]["networks"]) == {"edge"}
+
+
+def test_terminal_sim_runs_terminal_side_of_flood(services):
+    command = services["terminal-sim"]["command"]
+
+    assert command[:4] == ["python", "/opt/evp/load_test.py", "flood",
+                           "--side"]
+    assert command[4] == "terminal"
+    assert "https://gateway:8443" in command
+    assert services["terminal-sim"]["volumes"] == [
+        "../scripts/load_test.py:/opt/evp/load_test.py:ro"
+    ]
+
+
+def test_terminal_sim_is_hardened_and_holds_no_secrets(services):
+    service = services["terminal-sim"]
+
+    assert service["image"] == "python:3.11.17-slim"
+    assert service["user"] == "65534:65534"
+    assert service["read_only"] is True
+    assert service["cap_drop"] == ["ALL"]
+    assert "no-new-privileges:true" in service["security_opt"]
+    assert "secrets" not in service and "ports" not in service
