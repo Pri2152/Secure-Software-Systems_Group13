@@ -19,8 +19,14 @@ Never commit real secrets, passwords or keys.
 ## Before the first start
 
 - Docker Desktop must be running.
-- The gateway needs Workstream A's local test certificates in `nginx/certs/` (`server.crt`, `server.key`, `test-ca.crt`), as described in `docs/WORKSTREAM_A_IMPLEMENTATION.md`. Workstream E does not create or change certificates.
-- Workstream A also supplies `deploy/secrets/demo-voter.json` and `deploy/secrets/registered_fingerprints.txt`.
+- The gateway needs Workstream A's local test certificates in `nginx/certs/` (`server.crt`, `server.key`, `test-ca.crt`), `deploy/secrets/demo-voter.json` and `deploy/secrets/registered_fingerprints.txt` (see `docs/WORKSTREAM_A_IMPLEMENTATION.md`). They are git-ignored, so generate them, then the other secrets:
+
+```
+python deploy/scripts/make_lab_certs.py
+bash deploy/scripts/make_secrets.sh
+```
+
+`make_lab_certs.py` creates only missing files (`--force` regenerates them all) and also writes the client bundle `deploy/secrets/client/` (`test-ca.crt`, `mission-client.crt`, `mission-client.key`, `demo-voter.json`) for `scripts/vote_demo.py --certs deploy/secrets/client`. The test CA's private key stays in `deploy/secrets/ca/`. The certificates are for the lab only and expire after 30 days; run it with `--force` to renew them.
 
 ## Commands
 
