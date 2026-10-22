@@ -81,6 +81,15 @@ KEYS = (
      "audit_sign_v1", None, _ed25519_pair),
     ("ballot.ed25519.v1", "ballot", "sign", "ed25519",
      "ballot_sign_v1", None, _ed25519_pair),
+    # Each ballot record is encrypted under this key (ballot_protection.py).
+    ("ballot.aes-256-gcm.v1", "ballot", "aead", "aes-256-gcm",
+     "ballot_aead_v1", None, _hmac_secret),
+    # Authenticates the hash-linked ballot chain (ballot_chain.py).
+    ("ballot-chain.hmac-sha256.v1", "ballot-chain", "mac", "hmac-sha256",
+     "ballot_chain_hmac_v1", None, _hmac_secret),
+    # Signs the public bulletin board (verification/bulletin.py).
+    ("bulletin.ed25519.v1", "bulletin", "sign", "ed25519",
+     "bulletin_sign_v1", None, _ed25519_pair),
     ("results.ed25519.v1", "results", "sign", "ed25519",
      "results_sign_v1", None, _ed25519_pair),
     ("election.rsa-oaep-sha256+aes-256-gcm.v1", "election", "seal",
