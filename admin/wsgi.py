@@ -6,7 +6,8 @@ Gunicorn target: admin.wsgi:app (deploy/ENTRYPOINTS.md)
 Security controls:
 - Registers only Workstream B's routes: staff login and
   elevation (SR-02), dual authorisation (SR-06) and the
-  auditor endpoints (SR-17); no voter or ballot routes
+  auditor endpoints (SR-17), plus GET /healthz (SR-19);
+  no voter or ballot routes
 - Own database URLs from the environment; the audit log
   uses its own engine on the audit database
 - Fails closed at start-up: no secret key, identity or
@@ -44,6 +45,7 @@ import audit
 import crypto_agility
 from audit import create_audit_blueprint, install_audit_handler
 from rate_limit import LoginRateLimiter
+from platform_security.health import health_blueprint
 from records import db
 
 from .accounts import staff_account_is_active
@@ -210,6 +212,8 @@ def create_app(
     app.register_blueprint(create_audit_blueprint(
         elevation.require_elevated, audit_log, audit=record_event,
     ))
+    # SR-19: the Docker health check calls GET /healthz inside the container
+    app.register_blueprint(health_blueprint)
 
     _install_field_crypto_provider(crypto)
     install_audit_handler(record_event)
