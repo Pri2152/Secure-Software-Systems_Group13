@@ -1,0 +1,377 @@
+# SR-20: Compartmentalised deployment of the Electronic Voting Platform.
+#
+# Security controls:
+# - Each compartment runs in its own container from deploy/Dockerfile.app
+# - Each database has its own container, volume and internal network,
+#   so e.g. the ballot service cannot reach the identity database
+# - Every network except edge is internal (no outside access)
+# - Secrets come from files in deploy/secrets/ (git-ignored), never inline
+# - Pinned image versions; app containers run as non-root, read-only,
+#   with no Linux capabilities and no privilege escalation
+# - restart: unless-stopped and health checks on every app service (SR-19)
+#
+# TLS is unchanged: the gateway mounts Workstream A's existing Nginx
+# configuration and local certificate folder read-only. Workstream E
+# does not create or change certificates or TLS settings.
+#
+# Start (from the repository root), then apply database accounts:
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#   bash deploy/scripts/apply_db_security.sh
+# Services under the "full" profile start only with --profile full.
+#
+# Local academic prototype.
+
+name: evp
+
+# Shared settings for every Python app container.
+x-app-service: &app-service
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile.app
+  image: evp-app:local
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  # SR-19: GET /healthz (platform_security/health.py), called inside
+  # the container; Nginx does not route it.
+  healthcheck:
+    test:
+      - CMD
+      - python
+      - -c
+      - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/healthz', timeout=3)"
+    interval: 10s
+    timeout: 5s
+    retries: 3
+    start_period: 20s
+
+# Workstream A voter access, two replicas (SR-19 failover).
+x-voter-access: &voter-access
+  <<: *app-service
+  command:
+    - gunicorn
+    - --workers
+    - "1"
+    - --bind
+    - 0.0.0.0:5000
+    - gateway_runtime:application
+  environment:
+    EVP_LOCAL_LAB: "1"
+    # Trust X-EVP-* headers only from the gateway's fixed address,
+    # not the whole edge subnet (gateway_security.py, SR-07/SR-20).
+    EVP_TRUSTED_GATEWAY_NETWORKS: "172.30.0.10/32"
+    # Browser traffic on this PC reaches Nginx through Docker's port
+    # publishing and arrives from the edge network's gateway address.
+    # The lab treats that one address as the simulated overseas mission.
+    EVP_SIMULATED_MISSION_NETWORKS: "172.30.0.1/32"
+    # SR-13: only the PII key, listed in voter-access's own manifest.
+    EVP_KEY_DIR: /run/secrets/evp_keys
+  secrets:
+    - source: voter_demo_voter
+      target: /run/evp/demo-voter.json
+    - source: voter_registered_fingerprints
+      target: /run/evp/registered_fingerprints.txt
+    - source: voter_access_keys_manifest
+      target: /run/secrets/evp_keys/manifest.json
+    - source: key_pii_v1
+      target: /run/secrets/evp_keys/pii_key_v1
+  networks:
+    - edge
+    - identity_net
+
+services:
+
+  gateway:
+    image: nginx:1.30.6-alpine
+    restart: unless-stopped
+    # Bound to this PC only; not reachable from the local network.
+    ports:
+      - "127.0.0.1:8443:8443"
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ../nginx/conf.d:/etc/nginx/conf.d:ro
+      - ../nginx/certs:/etc/nginx/certs:ro
+    networks:
+      edge:
+        # Fixed so voter-access can trust this one address only.
+        ipv4_address: 172.30.0.10
+    depends_on:
+      - voter-access-1
+      - voter-access-2
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  voter-access-1:
+    <<: *voter-access
+
+  voter-access-2:
+    <<: *voter-access
+
+  # Workstream B: staff authentication, SR-06 and audit reader.
+  # Settings from admin/wsgi.py. It starts once apply_db_security.sh has
+  # created its tables and database accounts; until then it restarts.
+  admin-audit:
+    <<: *app-service
+    # The database URLs need the account passwords, so they are built
+    # here from the secret files at start-up and never stored in
+    # Compose. "$$" is a literal "$" for the shell.
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        identity_pw="$$(cat /run/secrets/admin_db_password)"
+        audit_pw="$$(cat /run/secrets/audit_db_password)"
+        export EVP_IDENTITY_DB_URL="mysql+pymysql://admin_identity:$${identity_pw}@db-identity:3306/identity_db"
+        export EVP_AUDIT_DB_URL="mysql+pymysql://audit_writer:$${audit_pw}@db-audit:3306/audit_db"
+        unset identity_pw audit_pw
+        exec gunicorn --workers 1 --bind 0.0.0.0:5000 admin.wsgi:app
+    environment:
+      SECRET_KEY_FILE: /run/secrets/flask_secret_key
+      # Only the keys this compartment uses, listed in its own manifest.
+      EVP_KEY_DIR: /run/secrets/evp_keys
+      EVP_AUDIT_ARCHIVE: /var/lib/evp/audit/checkpoints.jsonl
+    secrets:
+      - flask_secret_key
+      - admin_db_password
+      - audit_db_password
+      - source: admin_audit_keys_manifest
+        target: /run/secrets/evp_keys/manifest.json
+      - source: key_pii_v1
+        target: /run/secrets/evp_keys/pii_key_v1
+      - source: key_audit_hmac_v1
+        target: /run/secrets/evp_keys/audit_hmac_v1
+      - source: key_audit_sign_v1
+        target: /run/secrets/evp_keys/audit_sign_v1
+    volumes:
+      # Signed checkpoints, kept apart from the audit database (SR-17).
+      - audit_archive:/var/lib/evp/audit
+    depends_on:
+      db-identity:
+        condition: service_healthy
+      db-audit:
+        condition: service_healthy
+    networks:
+      - edge
+      - audit_net
+      - identity_net
+
+  # Workstream C: ballot store. Never on identity_net (SR-08, SR-20).
+  # Remove the profile when ballot/wsgi.py is merged to main.
+  ballot:
+    <<: *app-service
+    profiles: ["full"]
+    command: ["gunicorn", "--workers", "1", "--bind", "0.0.0.0:5000", "ballot.wsgi:app"]
+    networks:
+      - edge
+      - ballot_net
+
+  # Workstream D: tally and bulletin. Reads ballots, sends results.
+  # Remove the profile when verification/wsgi.py is merged to main.
+  tally:
+    <<: *app-service
+    profiles: ["full"]
+    command: ["gunicorn", "--workers", "1", "--bind", "0.0.0.0:5000", "verification.wsgi:app"]
+    networks:
+      - ballot_net
+      - results_net
+
+  # Workstream D: external results receiver.
+  # Remove the profile when results_consumer/wsgi.py is merged to main.
+  results-consumer:
+    <<: *app-service
+    profiles: ["full"]
+    command: ["gunicorn", "--workers", "1", "--bind", "0.0.0.0:5000", "results_consumer.wsgi:app"]
+    networks:
+      - results_net
+
+  # SR-19 drill: a registered polling terminal for the flood test. Its
+  # fixed address is the one listed in nginx/conf.d/evp.conf (geo block),
+  # so the gateway applies terminal limits, not public ones. Starts only
+  # with --profile drill; runs the terminal side of scripts/load_test.py.
+  terminal-sim:
+    image: python:3.11.17-slim
+    profiles: ["drill"]
+    restart: "no"
+    user: "65534:65534"
+    command:
+      - python
+      - /opt/evp/load_test.py
+      - flood
+      - --side
+      - terminal
+      - --target
+      - https://gateway:8443
+      - --insecure
+      - --duration
+      - "60"
+    volumes:
+      - ../scripts/load_test.py:/opt/evp/load_test.py:ro
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - gateway
+    networks:
+      edge:
+        ipv4_address: 172.30.0.20
+
+  # deploy/db/roles.sql is applied by deploy/scripts/apply_db_security.sh,
+  # which fills its ${...} password placeholders from deploy/secrets/.
+  db-identity:
+    image: mysql:8.4.11
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: identity_db
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/db_identity_root_password
+    secrets:
+      - db_identity_root_password
+    volumes:
+      - identity_data:/var/lib/mysql
+    networks:
+      - identity_net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  db-ballot:
+    image: mysql:8.4.11
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ballot_db
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/db_ballot_root_password
+    secrets:
+      - db_ballot_root_password
+    volumes:
+      - ballot_data:/var/lib/mysql
+    networks:
+      - ballot_net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  db-audit:
+    image: mysql:8.4.11
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: audit_db
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/db_audit_root_password
+    secrets:
+      - db_audit_root_password
+    volumes:
+      - audit_data:/var/lib/mysql
+    networks:
+      - audit_net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # SR-19: backups every 15 minutes (RPO <= 15 min) into the separate
+  # "backups" volume, keeping the newest 96 (24 hours). The loop is
+  # deploy/scripts/backup.sh; restore with deploy/scripts/restore.sh.
+  backup:
+    image: mysql:8.4.11
+    restart: unless-stopped
+    entrypoint: ["bash", "/usr/local/bin/evp-backup.sh"]
+    environment:
+      BACKUP_INTERVAL_SECONDS: "900"
+      BACKUP_KEEP: "96"
+    secrets:
+      - db_identity_root_password
+      - db_ballot_root_password
+      - db_audit_root_password
+    volumes:
+      - ./scripts/backup.sh:/usr/local/bin/evp-backup.sh:ro
+      - backups:/backups
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      db-identity:
+        condition: service_healthy
+      db-ballot:
+        condition: service_healthy
+      db-audit:
+        condition: service_healthy
+    # Unhealthy when the newest backup is more than 30 minutes old.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "find /backups -mindepth 1 -maxdepth 1 -type d -name '*Z' -mmin -30 | grep -q ."]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    networks:
+      - identity_net
+      - ballot_net
+      - audit_net
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+          gateway: 172.30.0.1
+  identity_net:
+    internal: true
+  ballot_net:
+    internal: true
+  audit_net:
+    internal: true
+  results_net:
+    internal: true
+
+volumes:
+  identity_data: {}
+  ballot_data: {}
+  audit_data: {}
+  audit_archive: {}
+  backups: {}
+
+# Files are created locally and are git-ignored (deploy/secrets/).
+secrets:
+  db_identity_root_password:
+    file: ./secrets/db_identity_root_password
+  db_ballot_root_password:
+    file: ./secrets/db_ballot_root_password
+  db_audit_root_password:
+    file: ./secrets/db_audit_root_password
+  voter_demo_voter:
+    file: ./secrets/demo-voter.json
+  voter_registered_fingerprints:
+    file: ./secrets/registered_fingerprints.txt
+  flask_secret_key:
+    file: ./secrets/flask_secret_key
+  admin_db_password:
+    file: ./secrets/admin_db_password
+  audit_db_password:
+    file: ./secrets/audit_db_password
+  admin_audit_keys_manifest:
+    file: ./secrets/keys/manifest-admin-audit.json
+  voter_access_keys_manifest:
+    file: ./secrets/keys/manifest-voter-access.json
+  key_pii_v1:
+    file: ./secrets/keys/pii_key_v1
+  key_audit_hmac_v1:
+    file: ./secrets/keys/audit_hmac_v1
+  key_audit_sign_v1:
+    file: ./secrets/keys/audit_sign_v1

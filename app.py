@@ -25,6 +25,7 @@ from flask_session import Session
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 
 from gateway_security import evaluate_gateway_request
+from platform_security.health import health_blueprint
 from record_routes import create_record_blueprint
 from records import db
 from voting_routes import create_voting_blueprint
@@ -61,6 +62,14 @@ app.config.update(
     MISSION_ACCESS_POLICY=None,
 
     SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+    SQLALCHEMY_BINDS={
+        name: os.environ[variable]
+        for name, variable in (
+            ("ballot", "EVP_BALLOT_DB_URL"),
+            ("audit", "EVP_AUDIT_DB_URL"),
+        )
+        if os.environ.get(variable)
+    },
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
 )
 
@@ -151,6 +160,7 @@ def establish_authenticated_session(
     active_session.clear()
     active_session["authenticated"] = True
     active_session["voter_id"] = verified_voter_id
+    active_session["role"] = "voter"
     active_session["last_activity"] = current_timestamp()
     active_session.permanent = True
 
@@ -194,6 +204,7 @@ def require_active_session(view_function):
 
         return view_function(*args, **kwargs)
 
+    wrapper.requires_active_session = True
     return wrapper
 
 
@@ -328,6 +339,7 @@ app.register_blueprint(
     )
 )
 
+app.register_blueprint(health_blueprint)  # SR-19 GET /healthz
 app.register_blueprint(create_voting_blueprint(require_active_session))
 
 
