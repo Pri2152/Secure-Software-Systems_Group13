@@ -30,7 +30,7 @@ TLS_LINES = [
     "listen 8443 ssl;",
     "ssl_certificate /etc/nginx/certs/server.crt;",
     "ssl_certificate_key /etc/nginx/certs/server.key;",
-    "ssl_protocols TLSv1.2 TLSv1.3;",
+    "ssl_protocols TLSv1.3;",  # SR-12: TLS 1.3 only
     "ssl_session_tickets off;",
     "ssl_client_certificate /etc/nginx/certs/test-ca.crt;",
     "ssl_verify_client optional;",

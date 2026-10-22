@@ -28,6 +28,7 @@ from gateway_security import evaluate_gateway_request
 from platform_security.health import health_blueprint
 from record_routes import create_record_blueprint
 from records import db
+from verification.headers import register_security_headers
 from voting_routes import create_voting_blueprint
 
 
@@ -341,6 +342,7 @@ app.register_blueprint(
 
 app.register_blueprint(health_blueprint)  # SR-19 GET /healthz
 app.register_blueprint(create_voting_blueprint(require_active_session))
+register_security_headers(app)  # SR-15 security headers on every response
 
 
 if __name__ == "__main__":
