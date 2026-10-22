@@ -75,10 +75,24 @@ def test_only_admin_audit_routes_are_registered(environ):
 
     rules = {rule.rule for rule in app.url_map.iter_rules()}
 
-    assert all(rule.startswith(ADMIN_PREFIXES) for rule in rules)
+    # /healthz is the one extra route: Docker's health check (SR-19)
+    assert all(
+        rule.startswith(ADMIN_PREFIXES) or rule == "/healthz"
+        for rule in rules
+    )
     assert {"/staff/login", "/staff/elevate", "/admin/operations",
             "/audit/events", "/audit/verify"} <= rules
     assert "/login" not in rules
+
+
+# SR-19: the container health check needs GET /healthz to answer
+def test_health_check_answers_without_login(environ):
+    app = build(environ)
+
+    reply = app.test_client().get("/healthz")
+
+    assert reply.status_code == 200
+    assert reply.get_json() == {"status": "ok"}
 
 
 # Test 2: Session and cookie hardening match Workstream A
