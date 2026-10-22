@@ -1,17 +1,11 @@
 """
-SR-15: Centralised server-side input validation.
+SR-15: one place to check all user input.
 
-Security controls:
-- Allow-list of fields for every request (unknown or
-  missing fields are rejected)
-- Type, length, format and range checks (allow-lists,
-  never blocklists)
-- Small validators joined in a chain: each check either
-  passes the value on or stops the request
-- Every failure raises ValidationError; routes return
-  one generic 400 and never echo the input
-
-Local academic prototype.
+- Only known fields are allowed, extra or missing ones are rejected.
+- We check type, length and format with allow-lists (no blocklists).
+- Small checks run one after another in a chain.
+- Any problem raises ValidationError. The route sends a plain 400
+  and never sends the input back.
 """
 
 import base64
@@ -34,7 +28,7 @@ ENVELOPE_FIELDS = frozenset(
 
 
 class ValidationError(ValueError):
-    """Input rejected. The reason is for logs and tests only."""
+    """Input rejected. The reason is only for logs and tests."""
 
     def __init__(self, field, reason):
         super().__init__(reason)
@@ -42,11 +36,10 @@ class ValidationError(ValueError):
         self.reason = reason
 
 
-# Building blocks: each check takes a value and returns it,
-# or raises ValidationError.
+# Small checks. Each one returns the value or raises ValidationError.
 
 def require_exact_fields(data, allowed, required=None):
-    """Only the allowed fields may appear; required ones must."""
+    """Only allowed fields can be there, required ones must be there."""
 
     required = allowed if required is None else required
 
@@ -78,7 +71,7 @@ def check_text(field, *, min_len=1, max_len=255, pattern=None):
 
 def check_int(field, *, minimum=1, maximum=2**31 - 1):
     def check(value):
-        # bool is a subclass of int, so test the exact type
+        # True and False count as int in Python, so check exact type
         if type(value) is not int:
             raise ValidationError(field, "type")
 
@@ -105,7 +98,7 @@ def check_base64(field, *, max_len=MAX_ENVELOPE_FIELD_LENGTH):
 
 
 def run_chain(value, *checks):
-    """Pass the value through each check in order."""
+    """Run the value through each check, one by one."""
 
     for check in checks:
         value = check(value)
@@ -113,7 +106,7 @@ def run_chain(value, *checks):
     return value
 
 
-# Validators for the values used by the voting platform.
+# Checks for the values our voting app uses.
 
 def validate_election_id(value):
     return run_chain(
@@ -176,9 +169,9 @@ def validate_ballot_request(data):
 
 def validate_ballot_envelope(data):
     """
-    Sealed ballot envelope (see crypto_agility seal()): exact
-    keys, base64 binary fields and size caps. Format only; the
-    signature or decryption check happens later.
+    Check a sealed ballot (made by crypto_agility seal()).
+    Only the shape: exact keys, base64 fields, size limit.
+    Decrypting is done later, not here.
     """
 
     require_exact_fields(data, ENVELOPE_FIELDS)

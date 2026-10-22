@@ -1,11 +1,9 @@
 """
-SR-15: Attack-payload sweep across every input route.
+SR-15: send attack input to every route that accepts data.
 
-Every route that accepts POST, PUT, PATCH or DELETE is sent a set of
-hostile payloads (SQL injection, script tags, template injection, path
-tricks, oversize values, wrong types). For each request the platform
-must answer with a client error, never crash (no 5xx), and never send
-the payload back in the response.
+Payloads: SQL injection, script tags, template injection, path tricks,
+very long text, wrong types. The app must not crash (no 5xx) and must
+not send the payload back in the response.
 """
 
 import pytest
@@ -29,7 +27,7 @@ PAYLOADS = [
     "A" * 3000,
 ]
 
-# A marker that would show up if a response echoed input unescaped.
+# If one of these shows in a response, the input was echoed back.
 ECHO_MARKERS = ["<script>", "DROP TABLE", "{{7*7}}", "../../etc/passwd"]
 
 
@@ -39,7 +37,7 @@ def write_routes():
         methods = WRITE_METHODS & set(rule.methods)
         if rule.endpoint == "static" or not methods:
             continue
-        # fill URL parameters (e.g. <record_id>) with a hostile value
+        # put a simple value in the URL parameters, like <record_id>
         url = rule.rule
         for argument in rule.arguments:
             url = url.replace(f"<int:{argument}>", "1")
@@ -52,9 +50,9 @@ def write_routes():
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setitem(application.app.config, "TESTING", True)
-    # Let requests reach the validation and login layers, not stop at CSRF.
+    # CSRF off here, so the request reaches the login and validation code.
     monkeypatch.setitem(application.app.config, "WTF_CSRF_ENABLED", False)
-    # Login needs a coordinator; with no known voters every login fails.
+    # Login needs a coordinator. No known voters, so every login fails.
     monkeypatch.setitem(
         application.app.config,
         "LOGIN_COORDINATOR",

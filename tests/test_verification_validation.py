@@ -1,4 +1,4 @@
-"""SR-15: Central validation accepts good input and rejects attacks."""
+"""SR-15: validation accepts good input and rejects attack input."""
 
 import pytest
 

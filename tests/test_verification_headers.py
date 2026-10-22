@@ -1,4 +1,4 @@
-"""SR-15: Every response carries the security headers."""
+"""SR-15: every response has the security headers."""
 
 from flask import Flask, jsonify
 

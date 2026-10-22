@@ -1,10 +1,9 @@
 """
-SR-15: No SQL built from strings.
+SR-15: no SQL built from strings.
 
-Every database call must pass a fixed statement (an ORM select() or a
-literal) and let the driver bind values. This test reads the source of
-the whole project and fails if a SQL string is built with an f-string,
-%, + or .format().
+DB calls must use a fixed statement and let the driver bind values.
+This test reads all project code and fails if SQL is made with
+an f-string, %, + or .format().
 """
 
 import ast
@@ -36,7 +35,7 @@ def call_name(node):
 
 
 def literal_text(node):
-    """All string pieces inside an expression."""
+    """All the text pieces inside an expression."""
     return " ".join(
         part.value
         for part in ast.walk(node)
@@ -45,7 +44,7 @@ def literal_text(node):
 
 
 def is_built_string(node):
-    """True when the expression builds a string at run time."""
+    """True if the string is built while the code runs."""
     if isinstance(node, ast.JoinedStr):                    # f"..."
         return True
     if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Mod, ast.Add)):
@@ -80,7 +79,7 @@ def test_project_builds_no_sql_from_strings():
     assert not problems, "SQL built from a string: " + ", ".join(problems)
 
 
-# The checker itself must catch each unsafe pattern.
+# These tests check that the checker really catches bad patterns.
 
 def test_checker_flags_fstring_sql():
     assert risky_calls('db.execute(f"SELECT * FROM t WHERE id={x}")')

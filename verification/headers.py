@@ -1,14 +1,10 @@
 """
-SR-15: Security response headers.
+SR-15: security headers for every response.
 
-Security controls:
-- Every response carries headers that stop browsers running
-  injected script, sniffing content types, framing the page or
-  caching sensitive data
-- Headers are only added when a route has not set its own, so a
-  stricter route policy (such as the voting page) is never weakened
-
-Local academic prototype.
+- They stop the browser from running injected script, guessing
+  content type, putting our page in a frame, or caching private data.
+- A header is only added if the route did not set it already, so the
+  stricter voting page policy stays as it is.
 """
 
 SECURITY_HEADERS = {
@@ -23,7 +19,7 @@ SECURITY_HEADERS = {
 
 
 def register_security_headers(app):
-    """Add the standard headers to every response from this app."""
+    """Add the headers to every response of this app."""
 
     @app.after_request
     def add_security_headers(response):
