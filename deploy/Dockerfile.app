@@ -32,6 +32,8 @@ COPY platform_security/ ./platform_security/
 COPY admin/ ./admin/
 COPY audit/ ./audit/
 COPY crypto_agility/ ./crypto_agility/
+COPY templates/ ./templates/
+COPY static/ ./static/
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin evpuser \
     && install -d -o evpuser -g evpuser -m 700 /var/lib/evp/audit

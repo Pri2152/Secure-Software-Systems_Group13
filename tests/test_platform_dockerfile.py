@@ -170,6 +170,14 @@ def test_workstream_b_packages_are_copied(folder):
     assert f"{folder}/ ./{folder}/" in arguments_for("COPY")
 
 
+# Workstream C's voting page: voting_routes.py looks for these
+# folders next to the code, under /app.
+@pytest.mark.parametrize("folder", ["templates", "static"])
+def test_voting_page_folders_are_copied(folder):
+    assert f"{folder}/ ./{folder}/" in arguments_for("COPY")
+    assert (REPO_ROOT / folder / "voting").is_dir()
+
+
 # .dockerignore
 
 def dockerignore_rules():
