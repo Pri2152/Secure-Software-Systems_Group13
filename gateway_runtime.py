@@ -27,7 +27,8 @@ from login_flow import LoginCoordinator, VoterRecord
 from mission_access import MissionAccessPolicy
 from platform_security.crypto_setup import install_pii_provider
 from records import db, EnrolmentRecord, AddressRecord
-
+from ballot_models import VotingEligibility
+from voting_runtime import configure_voting_demo
 
 REGISTRY_PATH = Path(
     "/run/evp/registered_fingerprints.txt"
@@ -171,7 +172,7 @@ def configure_local_gateway():
         LOGIN_COORDINATOR=coordinator,
     )
 
-    # Synthetic in-memory data for SR-05 demonstrations.
+    # Synthetic in-memory data for SR-03 and SR-05 demonstrations.
     with app.app_context():
         db.create_all()
 
@@ -187,9 +188,20 @@ def configure_local_gateway():
                 owner_voter_id=account_id,
                 address_text="Synthetic Test Address",
             ),
+            VotingEligibility(
+                voter_id=account_id,
+                election_id=app.config["VOTING_ELECTION_ID"],
+                electoral_division="Melbourne",
+                state_code="VIC",
+                eligible=True,
+                has_voted=False,
+            ),
         ])
 
         db.session.commit()
+
+    if os.environ.get("EVP_VOTING_DEMO") == "1":
+        configure_voting_demo(app)
 
     return app
 
