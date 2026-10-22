@@ -35,6 +35,14 @@ PUBLIC_ENDPOINTS = frozenset({
     # Must be public so a voter can log in; protected
     # by CSRF, MFA and rate limiting (SR-01).
     "login",
+    # Workstream C's /vote/assets/<path:filename>: static
+    # CSS and JavaScript only, no data.
+    "voting.static",
+    # Workstream C's POST /vote/ballots: authenticated by a
+    # single-use anonymous ballot credential and CSRF, not a
+    # session, so ballots stay unlinkable to voters (SR-08);
+    # see docs/WORKSTREAM_C_INTEGRATION.md.
+    "voting.ballots",
 })
 
 
