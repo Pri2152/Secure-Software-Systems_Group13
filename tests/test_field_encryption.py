@@ -193,6 +193,7 @@ def test_tampered_record_does_not_affect_other_records(
 
 # Start-up
 
+@pytest.mark.no_pii_provider
 def test_start_up_without_pii_key_refuses_to_run():
     result = run_runtime()
 

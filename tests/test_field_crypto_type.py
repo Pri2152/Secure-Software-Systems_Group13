@@ -27,6 +27,9 @@ from platform_security.field_crypto import (
 )
 
 
+# Many tests here check behaviour with no provider installed.
+pytestmark = pytest.mark.no_pii_provider
+
 PLAINTEXT = "12 Example Street, Melbourne VIC 3000"
 
 

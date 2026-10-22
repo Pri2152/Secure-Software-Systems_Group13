@@ -149,6 +149,7 @@ def clean_crypto():
     set_crypto_provider(None)
 
 
+@pytest.mark.no_pii_provider
 def test_install_registers_crypto_agility(clean_crypto):
     install_pii_provider({"EVP_CRYPTO_DEV_KEYS": "1"})
 
@@ -161,6 +162,7 @@ def test_install_registers_crypto_agility(clean_crypto):
     assert column.process_result_value(stored, None) == "someone@example.test"
 
 
+@pytest.mark.no_pii_provider
 def test_install_without_keys_fails_closed(clean_crypto):
     with pytest.raises(CryptoProviderNotConfigured, match="EVP_KEY_DIR"):
         install_pii_provider({})
@@ -175,6 +177,7 @@ def write_key_dir(folder, entries):
         (folder / name).write_text(content)
 
 
+@pytest.mark.no_pii_provider
 def test_install_without_pii_key_fails_closed(clean_crypto, tmp_path):
     keys = tmp_path / "keys"
     write_key_dir(keys, {
@@ -193,6 +196,7 @@ def test_install_without_pii_key_fails_closed(clean_crypto, tmp_path):
         get_crypto_provider()
 
 
+@pytest.mark.no_pii_provider
 def test_installing_is_not_done_on_import():
     result = subprocess.run(
         [sys.executable, "-c",
