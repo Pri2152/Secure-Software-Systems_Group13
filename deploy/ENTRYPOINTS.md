@@ -10,7 +10,7 @@ The image has no default command. Each Compose service sets its own
 | admin-audit | `admin/wsgi.py` | `admin.wsgi:app` | Workstream B | Yes |
 | ballot | `ballot/wsgi.py` | `ballot.wsgi:app` | Workstream C | No |
 | tally | `verification/wsgi.py` | `verification.wsgi:app` | Workstream D | No |
-| results-consumer | `results_consumer/wsgi.py` | `results_consumer.wsgi:app` | Workstream D | No |
+| results-consumer | `results_consumer/wsgi.py` | `results_consumer.wsgi:app` | Workstream D | Yes |
 
 Checked against `origin/main` at `90f4968`. `tests/test_platform_dockerfile.py`
 fails if the "On `main` yet" column no longer matches the files in the repository.
