@@ -39,16 +39,25 @@ def _record_refusal(division):
         logger.error("TALLY_REFUSED audit_unavailable")
 
 
-def count_division(election_id, division):
-    """Return {candidate_id: votes} for one division."""
+def verified_choices(election_id, division):
+    """
+    The choices of one division, only if the whole chain checks out.
+    Raises TallyRefused if not.
+    """
 
     try:
-        candidate_ids = verified_candidate_ids_for_tally(election_id, division)
+        return verified_candidate_ids_for_tally(election_id, division)
     except BallotIntegrityError:
         _record_refusal(division)
         raise TallyRefused("Tally refused: ballot check failed") from None
 
-    return dict(sorted(Counter(candidate_ids).items()))
+
+def count_division(election_id, division):
+    """Return {candidate_id: votes} for one division."""
+
+    choices = verified_choices(election_id, division)
+
+    return dict(sorted(Counter(choices).items()))
 
 
 def count_election(election_id, divisions):
