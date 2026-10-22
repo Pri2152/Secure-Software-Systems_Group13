@@ -45,6 +45,9 @@ KEY_FILES = (
     "audit_hmac_v1",
     "audit_sign_v1",
     "ballot_sign_v1",
+    "ballot_aead_v1",
+    "ballot_chain_hmac_v1",
+    "bulletin_sign_v1",
     "results_sign_v1",
     "election_seal_v1",
 )
@@ -456,6 +459,22 @@ def test_every_default_policy_key_works(key_service):
     assert key_service.open(
         "election", key_service.seal("election", data)
     ) == data
+
+
+def test_generated_keys_cover_ballot_and_bulletin_purposes(key_service):
+    # The app asks for these purposes by name: a missing key only shows
+    # up at vote or tally time, so check every one here.
+    data = b"ballot record"
+
+    assert key_service.verify_mac(
+        "ballot-chain", data, key_service.mac("ballot-chain", data)
+    )
+    assert key_service.decrypt(
+        "ballot", key_service.encrypt("ballot", data, b"meta"), b"meta"
+    ) == data
+    assert key_service.verify(
+        "bulletin", data, key_service.sign("bulletin", data)
+    )
 
 
 def test_field_crypto_accepts_generated_keys(key_service):
