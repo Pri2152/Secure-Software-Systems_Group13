@@ -41,7 +41,7 @@ DIVISION = "Melbourne"
 
 
 @pytest.fixture
-def database():
+def database(pii_provider):
     app = Flask(__name__)
     app.config.update(
         TESTING=True,

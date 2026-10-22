@@ -28,7 +28,7 @@ TEST_SECRET = "JBSWY3DPEHPK3PXP"
 
 
 @pytest.fixture
-def environment(monkeypatch):
+def environment(monkeypatch, pii_provider):
     now = [1700000000.0]
 
     voters = {

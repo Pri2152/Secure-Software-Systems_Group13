@@ -1,0 +1,14 @@
+# SR-20: Weekly alerts and update PRs for third-party components.
+
+version: 2
+
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"

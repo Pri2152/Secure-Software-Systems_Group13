@@ -29,7 +29,7 @@ HTTPS_URL = "https://localhost"
 
 
 @pytest.fixture
-def client():
+def client(pii_provider):
     test_app = Flask(__name__)
 
     test_app.config.update(

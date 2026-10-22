@@ -11,6 +11,8 @@ Prototype models for controlled testing.
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import select
 
+from platform_security.field_crypto import EncryptedText
+
 
 db = SQLAlchemy()
 
@@ -35,7 +37,7 @@ class EnrolmentRecord(db.Model):
     )
 
     contact_email = db.Column(
-        db.String(254),
+        EncryptedText("pii"),
         nullable=False
     )
 
@@ -55,7 +57,7 @@ class AddressRecord(db.Model):
     )
 
     address_text = db.Column(
-        db.String(255),
+        EncryptedText("pii"),
         nullable=False
     )
 

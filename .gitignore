@@ -25,3 +25,13 @@ Thumbs.db
 .coverage
 htmlcov/
 /nginx/certs/
+
+# Workstream E: secrets, certificates and generated artefacts (SR-13, SR-20)
+deploy/secrets/
+certs/
+*.key
+*.pem
+*.crt
+*.p12
+sbom.json
+backups/

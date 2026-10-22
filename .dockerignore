@@ -13,3 +13,9 @@ nginx/
 *.srl
 *.db
 *.sqlite3
+
+# Workstream E: keep notes, secrets, backups and tests out of images (SR-20)
+.notes
+deploy/secrets
+backups
+tests
