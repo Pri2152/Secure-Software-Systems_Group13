@@ -1,0 +1,82 @@
+# Lab-only voting demo (Workstream C + D).
+#
+# Adds the voting screens to the two voter-access replicas, so a demo
+# voter can sign in and cast a vote through the HTTPS gateway.
+#
+# Start (from the repository root, after make_secrets.sh):
+#   docker compose -f deploy/docker-compose.yml \
+#                  -f deploy/docker-compose.voting-demo.yml up -d --build
+#
+# What it changes, and why it is for the lab only:
+# - Votes and candidates live in memory inside each replica. They are
+#   lost on restart. The separate ballot compartment (ballot/wsgi.py)
+#   is not on main yet, so this is the only way to try the vote screens.
+# - Each replica is given the full key folder, so it can encrypt and
+#   chain ballots. In the real design only the ballot compartment holds
+#   those keys (SR-08, SR-20). Do not copy this file into a real setup.
+# - Candidates come from deploy/demo/demo-candidates.json (made up names)
+#   and are approved by two synthetic staff rows at start-up.
+# - The audit log for this demo is a throw-away SQLite file in /tmp.
+#
+# Local academic prototype.
+
+x-demo-environment: &demo-environment
+  EVP_VOTING_DEMO: "1"
+  EVP_DEMO_CANDIDATES_FILE: /run/evp/demo-candidates.json
+  EVP_AUDIT_DB_URL: sqlite:////tmp/demo-audit.db
+  EVP_AUDIT_ARCHIVE: /tmp/demo-audit-checkpoints.jsonl
+
+x-demo-secrets: &demo-secrets !override
+  - source: voter_demo_voter
+    target: /run/evp/demo-voter.json
+  - source: voter_registered_fingerprints
+    target: /run/evp/registered_fingerprints.txt
+  - source: demo_candidates
+    target: /run/evp/demo-candidates.json
+  - source: all_keys_manifest
+    target: /run/secrets/evp_keys/manifest.json
+  - source: key_pii_v1
+    target: /run/secrets/evp_keys/pii_key_v1
+  - source: key_audit_hmac_v1
+    target: /run/secrets/evp_keys/audit_hmac_v1
+  - source: key_audit_sign_v1
+    target: /run/secrets/evp_keys/audit_sign_v1
+  - source: key_ballot_sign_v1
+    target: /run/secrets/evp_keys/ballot_sign_v1
+  - source: key_ballot_aead_v1
+    target: /run/secrets/evp_keys/ballot_aead_v1
+  - source: key_ballot_chain_hmac_v1
+    target: /run/secrets/evp_keys/ballot_chain_hmac_v1
+  - source: key_bulletin_sign_v1
+    target: /run/secrets/evp_keys/bulletin_sign_v1
+  - source: key_results_sign_v1
+    target: /run/secrets/evp_keys/results_sign_v1
+  - source: key_election_seal_v1
+    target: /run/secrets/evp_keys/election_seal_v1
+
+services:
+  voter-access-1:
+    environment: *demo-environment
+    secrets: *demo-secrets
+
+  voter-access-2:
+    environment: *demo-environment
+    secrets: *demo-secrets
+
+secrets:
+  demo_candidates:
+    file: ./demo/demo-candidates.json
+  all_keys_manifest:
+    file: ./secrets/keys/manifest.json
+  key_ballot_sign_v1:
+    file: ./secrets/keys/ballot_sign_v1
+  key_ballot_aead_v1:
+    file: ./secrets/keys/ballot_aead_v1
+  key_ballot_chain_hmac_v1:
+    file: ./secrets/keys/ballot_chain_hmac_v1
+  key_bulletin_sign_v1:
+    file: ./secrets/keys/bulletin_sign_v1
+  key_results_sign_v1:
+    file: ./secrets/keys/results_sign_v1
+  key_election_seal_v1:
+    file: ./secrets/keys/election_seal_v1
