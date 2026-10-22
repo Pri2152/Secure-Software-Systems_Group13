@@ -32,6 +32,8 @@ COPY platform_security/ ./platform_security/
 COPY admin/ ./admin/
 COPY audit/ ./audit/
 COPY crypto_agility/ ./crypto_agility/
+COPY results_consumer/ ./results_consumer/
+COPY verification/ ./verification/
 COPY templates/ ./templates/
 COPY static/ ./static/
 
