@@ -29,6 +29,7 @@ from platform_security.health import health_blueprint
 from record_routes import create_record_blueprint
 from records import db
 from verification.headers import register_security_headers
+from signin_routes import create_signin_blueprint
 from voting_routes import create_voting_blueprint
 
 
@@ -342,6 +343,7 @@ app.register_blueprint(
 
 app.register_blueprint(health_blueprint)  # SR-19 GET /healthz
 app.register_blueprint(create_voting_blueprint(require_active_session))
+app.register_blueprint(create_signin_blueprint())
 register_security_headers(app)  # SR-15 security headers on every response
 
 
