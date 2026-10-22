@@ -251,10 +251,13 @@ def test_login_location_uses_strict_zone(https):
 
 
 def test_ballot_location_is_stricter_than_public(http, https):
-    ballot = location(https, "/ballot/")
+    ballot = location(https, "/vote")
     zones = zone_definitions(http)
 
     assert set(limit_reqs(ballot)) == {"evp_ballot", "evp_terminal"}
+    assert [args[-1] for args in args_of(ballot, "access_log")] == [
+        "evp_ballot_no_ip"
+    ]
     assert per_second(zones["evp_ballot"]["rate"]) < per_second(
         zones["evp_public"]["rate"]
     )
@@ -285,7 +288,7 @@ def test_ballot_uses_log_format_without_client_ip(http, https):
                   "$http_user_agent", "$remote_user", "$ssl_client"):
         assert field not in log_format, field
 
-    assert args_of(location(https, "/ballot/"), "access_log") == [
+    assert args_of(location(https, "/vote"), "access_log") == [
         ["/var/log/nginx/evp_ballot_access.log", "evp_ballot_no_ip"]
     ]
 
