@@ -26,6 +26,17 @@
 
     <p id="message" role="status" aria-live="polite" class="message"></p>
 
+    <section id="mine" class="mine">
+      <h2>Check my ballot</h2>
+      <p class="lead">Paste the tracking code you were given after voting. This shows whether your ballot is on the published list. It never shows who you voted for.</p>
+      <form id="mine-form" class="row" autocomplete="off">
+        <label for="code">Tracking code</label>
+        <input id="code" type="text" spellcheck="false" placeholder="sha256:..." required minlength="71" maxlength="71" pattern="sha256:[0-9a-f]{64}">
+        <div class="buttons"><button type="submit" id="check-mine">Check my ballot</button></div>
+      </form>
+      <p id="mine-result" role="status" aria-live="polite" class="message"></p>
+    </section>
+
     <section id="outcome" hidden>
       <div id="banner" class="banner"></div>
 

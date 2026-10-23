@@ -134,6 +134,9 @@ def run(certs, base_url, candidate, client=None):
 
     print("   vote accepted, confirmation received")
 
+    if reply.get("tracking_code"):
+        print(f"   tracking code: {reply['tracking_code']}")
+
     status, _ = send(client, base_url, "/vote")
     check("5a. Old session is closed", status, 401)
 

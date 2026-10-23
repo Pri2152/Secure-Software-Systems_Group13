@@ -55,3 +55,6 @@ caption { text-align: left; font-weight: 700; padding-bottom: 4px; }
 th, td { padding: 7px 8px; text-align: left; border-bottom: 1px solid var(--line); }
 td.num, th.num { text-align: right; }
 .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; word-break: break-all; color: var(--muted); }
+.message.ok { color: var(--ok); font-weight: 600; }
+.mine { margin: 24px 0; padding: 16px; border: 1px solid var(--line, #c6d0dc); border-radius: 10px; }
+.mine h2 { margin-top: 0; }
