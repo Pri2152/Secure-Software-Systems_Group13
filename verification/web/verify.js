@@ -109,6 +109,54 @@
     });
   }
 
+  var mineForm = document.getElementById("mine-form");
+  var mineResult = document.getElementById("mine-result");
+
+  mineForm.addEventListener("submit", function (event) {
+    event.preventDefault();
+
+    if (!tokenInput.value) {
+      mineResult.textContent = "Enter the tally token above first.";
+      mineResult.className = "message error";
+      return;
+    }
+
+    mineResult.textContent = "Checking...";
+    mineResult.className = "message";
+
+    fetch("/bulletin/lookup", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + tokenInput.value,
+        "Content-Type": "application/json"
+      },
+      credentials: "omit",
+      body: JSON.stringify({ tracking_code: document.getElementById("code").value.trim() })
+    }).then(function (response) {
+      if (!response.ok) {
+        mineResult.textContent = response.status === 400
+          ? "That is not a valid tracking code."
+          : failure(response);
+        mineResult.className = "message error";
+        return;
+      }
+      return response.json().then(function (data) {
+        if (data.included) {
+          mineResult.textContent = "Found. Your ballot is number " + data.position +
+            " of " + data.ballots_in_division + " in " + data.division +
+            " (result version " + data.version + ").";
+          mineResult.className = "message ok";
+        } else {
+          mineResult.textContent = "Not found on the published list (version " + data.version + ").";
+          mineResult.className = "message error";
+        }
+      });
+    }).catch(function () {
+      mineResult.textContent = "Could not reach the tally service.";
+      mineResult.className = "message error";
+    });
+  });
+
   form.addEventListener("submit", function (event) {
     event.preventDefault();
     busy(true);

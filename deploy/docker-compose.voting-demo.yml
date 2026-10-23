@@ -14,7 +14,7 @@
 # - Each replica is given the full key folder, so it can encrypt and
 #   chain ballots. In the real design only the ballot compartment holds
 #   those keys (SR-08, SR-20). Do not copy this file into a real setup.
-# - Candidates come from deploy/demo/demo-candidates.json (made up names)
+# - Candidates come from deploy/demo/demo-candidates.json (group members, invented party names)
 #   and are approved by two synthetic staff rows at start-up.
 # - The audit log for this demo is a throw-away SQLite file in /tmp.
 #

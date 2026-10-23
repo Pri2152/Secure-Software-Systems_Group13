@@ -43,10 +43,22 @@
       root.replaceChildren();
       document.title = "Vote accepted";
       const title = document.createElement("h1");
+      title.className = "done-title";
       title.textContent = "Vote accepted.";
       const confirmation = document.createElement("p");
+      confirmation.className = "receipt";
       confirmation.textContent = "Confirmation: " + result.confirmation_reference;
-      root.append(title, confirmation);
+      const shown = [title, confirmation];
+      if (typeof result.tracking_code === "string" && /^sha256:[0-9a-f]{64}$/.test(result.tracking_code)) {
+        const tracking = document.createElement("p");
+        tracking.className = "receipt tracking";
+        tracking.textContent = "Tracking code: " + result.tracking_code;
+        const note = document.createElement("p");
+        note.className = "hint";
+        note.textContent = "Keep this code. After results are published, use it on the verification page to confirm your ballot was counted. It does not reveal who you voted for.";
+        shown.push(tracking, note);
+      }
+      root.append(...shown);
     } catch (_) {
       if (!departed) error.textContent = "Your request could not be completed. If the connection was lost, acceptance may already have occurred. Sign in again to check whether voting is available.";
     } finally {

@@ -44,6 +44,7 @@ async function scenario(failed, hideAt) {
       if (hideAt === "ballot") handlers.pagehide();
       return {ok: true, json: async () => ({
         status: "accepted", confirmation_reference: "conf_" + "B".repeat(32),
+        tracking_code: "sha256:" + "c".repeat(64),
         candidate_id: 42, ballot_id: "must-not-display", ciphertext: "must-not-display"
       })};
     }
@@ -67,7 +68,10 @@ async function scenario(failed, hideAt) {
   if (!failed && !hideAt) {
     assert.deepEqual(JSON.parse(requests[1].options.body), {credential: "A".repeat(43), candidate_id: 42});
     assert.deepEqual(root.children.map(child => child.textContent),
-                     ["Vote accepted.", "Confirmation: conf_" + "B".repeat(32)]);
+                     ["Vote accepted.", "Confirmation: conf_" + "B".repeat(32),
+                      "Tracking code: sha256:" + "c".repeat(64),
+                      root.children[3].textContent]);
+    assert(root.children[3].textContent.includes("does not reveal"));
     assert.equal(form.selection, null);
   } else if (failed) {
     assert(error.textContent.includes("could not be completed"));

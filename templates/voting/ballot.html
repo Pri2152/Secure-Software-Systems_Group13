@@ -12,21 +12,23 @@
   <main id="voting-content">
     <p class="eyebrow">Electronic Voting Platform · Academic prototype</p>
     <h1>Cast your vote</h1>
-    <p>{{ election_id }} · {{ division }}</p>
-    <p>Select one candidate. Submitting accepts your final digital vote.</p>
+    <p class="meta"><span>{{ election_id }}</span><span>{{ division }}</span></p>
+    <p class="hint">Choose one candidate. Submitting records your final, secret vote and cannot be undone.</p>
     <form id="ballot-form" action="{{ url_for('voting.ballots') }}" method="post">
       <fieldset>
-        <legend>Final candidates</legend>
+        <legend>Candidates</legend>
         {% for candidate in candidates %}
         <label class="candidate">
           <input type="radio" name="candidate_id" value="{{ candidate.candidate_id }}" required>
-          <span><strong>{{ candidate.name }}</strong><span class="party">{{ candidate.party }}</span></span>
+          <span class="avatar" aria-hidden="true">{{ candidate.name[:1] }}</span>
+          <span class="who"><strong>{{ candidate.name }}</strong><span class="party">{{ candidate.party }}</span></span>
         </label>
         {% endfor %}
       </fieldset>
       <p id="voting-error" role="alert"></p>
       <button type="submit">Submit final vote</button>
     </form>
+    <p class="secure">Sent over TLS 1.3 · Your ballot is encrypted and stored without your name</p>
     <noscript>JavaScript is required for the secure ballot handoff.</noscript>
   </main>
 </body>

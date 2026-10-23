@@ -149,7 +149,7 @@ introduced.
 The external candidate file has exact shape:
 
 ```json
-{"candidates":[{"name":"Taylor Green","party":"Independent","position_in_group":1}]}
+{"candidates":[{"name":"Priyankaben Patel","party":"Harbour Reform","position_in_group":1}]}
 ```
 
 These names are an example fixture, not a hardcoded ballot list. Startup derives
