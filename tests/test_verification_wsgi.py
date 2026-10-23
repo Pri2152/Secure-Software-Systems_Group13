@@ -144,3 +144,32 @@ def test_security_headers_are_set(tally):
     reply = app.test_client().get("/healthz")
 
     assert reply.headers["X-Content-Type-Options"] == "nosniff"
+
+
+def test_checks_route_needs_the_token(tally):
+    app, _ = tally
+
+    assert app.test_client().get("/bulletin/checks").status_code == 401
+
+
+def test_checks_route_says_nothing_published_yet(tally):
+    app, _ = tally
+
+    response = app.test_client().get("/bulletin/checks", headers=HEADERS)
+
+    assert response.status_code == 404
+
+
+def test_checks_route_reports_totals_and_passing_checks(tally):
+    app, _ = tally
+    client = app.test_client()
+    client.post("/publish", headers=HEADERS)
+
+    data = client.get("/bulletin/checks", headers=HEADERS).get_json()
+
+    assert data["all_passed"] is True
+    assert data["ballots_counted"] == 3
+    assert data["divisions"]["Melbourne"] == {"7": 1, "8": 1}
+    assert data["version"] == 1
+    assert all(item["passed"] for item in data["checks"])
+    assert "record_hashes" not in data and "bulletin" not in data
