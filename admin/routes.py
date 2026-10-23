@@ -29,6 +29,8 @@ Local academic prototype.
 from flask import Blueprint, jsonify, request, session
 from flask_wtf.csrf import generate_csrf
 
+from verification.validation import ValidationError, validate_staff_login_request
+
 from .accounts import (
     StaffAccountError,
     create_staff_account,
@@ -121,12 +123,10 @@ def create_staff_blueprint(
     def staff_login():
         data = read_json_fields(LOGIN_FIELDS, LOGIN_FIELDS)
 
-        if (
-            data is None
-            or not isinstance(data["staff_id"], str)
-            or not 1 <= len(data["staff_id"]) <= MAX_STAFF_ID_INPUT
-            or not valid_password_input(data["password"])
-        ):
+        # SR-15: the central validator checks the fields and their format.
+        try:
+            validate_staff_login_request(data)
+        except ValidationError:
             return _error("Invalid request", 400)
 
         result = authenticator.authenticate(
