@@ -29,6 +29,7 @@ from platform_security.health import health_blueprint
 from record_routes import create_record_blueprint
 from records import db
 from verification.headers import register_security_headers
+from verification.validation import ValidationError, validate_login_request
 from signin_routes import create_signin_blueprint
 from voting_routes import create_voting_blueprint
 
@@ -251,23 +252,17 @@ def login():
             "error": "Invalid request"
         }), 400
 
-    account_id = data.get("account_id")
-    password = data.get("password")
-    totp_code = data.get("totp_code")
-
-    if (
-        not isinstance(account_id, str)
-        or not 1 <= len(account_id.strip()) <= 128
-        or not isinstance(password, str)
-        or not 1 <= len(password) <= 1024
-        or not isinstance(totp_code, str)
-        or len(totp_code) != 6
-        or not totp_code.isascii()
-        or not totp_code.isdigit()
-    ):
+    # SR-15: the central validator checks the fields and their format.
+    try:
+        validate_login_request(data)
+    except ValidationError:
         return jsonify({
             "error": "Invalid request"
         }), 400
+
+    account_id = data["account_id"]
+    password = data["password"]
+    totp_code = data["totp_code"]
 
     # In gateway mode, use the original source IP
     # validated during the SR-07 access check.
