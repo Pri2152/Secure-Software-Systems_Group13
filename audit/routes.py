@@ -9,7 +9,8 @@ Security controls:
   login, 403 for any role without the permission
 - Writing and reading are separate components: these
   routes only read; nothing here can change the log
-- Strict query validation: unknown parameters,
+- Strict query validation by the central SR-15 validator
+  (verification/validation.py): unknown parameters,
   unknown streams and out-of-range limits get 400
 - Responses carry event fields only, never hashes,
   MAC envelopes or key material; details were already
@@ -28,15 +29,10 @@ from collections.abc import Callable
 
 from flask import Blueprint, jsonify, request, session
 
+from verification.validation import ValidationError, validate_audit_query
+
 from .events import STREAM_ADMIN, STREAMS
 
-
-DEFAULT_READ_LIMIT = 50
-MAX_READ_LIMIT = 200
-MAX_LIMIT_DIGITS = 3
-
-EVENTS_PARAMETERS = frozenset({"stream", "limit"})
-VERIFY_PARAMETERS = frozenset({"stream"})
 
 logger = logging.getLogger("evp.audit")
 
@@ -49,33 +45,17 @@ def _unavailable():
     return jsonify({"error": "Audit service unavailable"}), 503
 
 
-def _stream_parameter(allowed: frozenset):
-    """The validated stream, or None if the query is invalid."""
+def _query(*, allow_limit: bool):
+    """(stream, limit) from the query string, or None if it is invalid."""
 
-    if not set(request.args) <= allowed:
+    try:
+        return validate_audit_query(
+            request.args.to_dict(),
+            streams=STREAMS,
+            allow_limit=allow_limit,
+        )
+    except ValidationError:
         return None
-
-    stream = request.args.get("stream")
-
-    return stream if stream in STREAMS else None
-
-
-def _limit_parameter():
-    value = request.args.get("limit")
-
-    if value is None:
-        return DEFAULT_READ_LIMIT
-
-    if (
-        not value.isascii()
-        or not value.isdigit()
-        or len(value) > MAX_LIMIT_DIGITS
-    ):
-        return None
-
-    limit = int(value)
-
-    return limit if 1 <= limit <= MAX_READ_LIMIT else None
 
 
 def create_audit_blueprint(
@@ -112,11 +92,12 @@ def create_audit_blueprint(
     @blueprint.get("/audit/events")
     @require_permission("audit.read")
     def read_events():
-        stream = _stream_parameter(EVENTS_PARAMETERS)
-        limit = _limit_parameter()
+        query = _query(allow_limit=True)
 
-        if stream is None or limit is None:
+        if query is None:
             return _bad_request()
+
+        stream, limit = query
 
         try:
             events = audit_reader.list_events(stream, limit)
@@ -130,10 +111,12 @@ def create_audit_blueprint(
     @blueprint.get("/audit/verify")
     @require_permission("audit.verify")
     def verify_log():
-        stream = _stream_parameter(VERIFY_PARAMETERS)
+        query = _query(allow_limit=False)
 
-        if stream is None:
+        if query is None:
             return _bad_request()
+
+        stream = query[0]
 
         try:
             result = audit_reader.verify_chain(stream).to_dict()
