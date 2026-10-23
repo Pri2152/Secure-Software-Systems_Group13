@@ -22,6 +22,16 @@ ENVELOPE_ALGORITHM_PATTERN = re.compile(r"[a-z0-9+._-]{1,64}", re.ASCII)
 ENVELOPE_KID_PATTERN = re.compile(r"[A-Za-z0-9:._-]{1,128}", re.ASCII)
 
 MAX_ENVELOPE_FIELD_LENGTH = 16384
+CANDIDATE_KEY_PATTERN = re.compile(r"[0-9]{1,10}", re.ASCII)
+
+MAX_DIVISIONS = 200
+MAX_CANDIDATES = 1000
+RESULT_PACKAGE_FIELDS = frozenset({"result", "signature"})
+RESULT_FIELDS = frozenset(
+    {"election_id", "version", "divisions", "ballots_counted"}
+)
+SIGNATURE_FIELDS = frozenset({"alg", "kid", "v", "sig"})
+
 ENVELOPE_FIELDS = frozenset(
     {"alg", "kid", "v", "wrapped_key", "nonce", "ct"}
 )
@@ -188,5 +198,58 @@ def validate_ballot_envelope(data):
 
     for name in ("wrapped_key", "nonce", "ct"):
         check_base64(name)(data[name])
+
+    return data
+
+
+def validate_result_package(data):
+    """
+    Check a signed result sent to the results receiver.
+    Only the shape and the value formats. The signature, election id
+    and version are checked after this by verification/results.py.
+    """
+
+    require_exact_fields(data, RESULT_PACKAGE_FIELDS)
+
+    result = require_exact_fields(data["result"], RESULT_FIELDS)
+
+    validate_election_id(result["election_id"])
+    run_chain(result["version"], check_int("version"))
+    run_chain(
+        result["ballots_counted"], check_int("ballots_counted", minimum=0)
+    )
+
+    divisions = result["divisions"]
+
+    if not isinstance(divisions, dict) or len(divisions) > MAX_DIVISIONS:
+        raise ValidationError("divisions", "shape")
+
+    for division, counts in divisions.items():
+        validate_division(division)
+
+        if not isinstance(counts, dict) or len(counts) > MAX_CANDIDATES:
+            raise ValidationError("divisions", "shape")
+
+        for candidate, votes in counts.items():
+            run_chain(
+                candidate,
+                check_text(
+                    "candidate", max_len=10, pattern=CANDIDATE_KEY_PATTERN
+                ),
+            )
+            run_chain(votes, check_int("votes", minimum=0))
+
+    signature = require_exact_fields(data["signature"], SIGNATURE_FIELDS)
+
+    run_chain(
+        signature["alg"],
+        check_text("alg", max_len=64, pattern=ENVELOPE_ALGORITHM_PATTERN),
+    )
+    run_chain(
+        signature["kid"],
+        check_text("kid", max_len=128, pattern=ENVELOPE_KID_PATTERN),
+    )
+    run_chain(signature["v"], check_int("v", minimum=1, maximum=99))
+    check_base64("sig", max_len=1024)(signature["sig"])
 
     return data

@@ -152,3 +152,74 @@ def test_chain_stops_at_first_failing_check():
         v.run_chain("x", first, second)
 
     assert calls == ["first"]
+
+
+# Signed result package (sent to the results receiver)
+
+def good_package():
+    return {
+        "result": {
+            "election_id": "election-2026",
+            "version": 1,
+            "divisions": {"Melbourne": {"7": 2, "8": 1}},
+            "ballots_counted": 3,
+        },
+        "signature": {
+            "alg": "ed25519",
+            "kid": "results.ed25519.v1",
+            "v": 1,
+            "sig": "zDr0u7yzznRj66xjOjThko+z+tMqjFgf78E3Tjmauu4LRueJBl6E"
+                   "PSHNgR3/KkaAdIJosd7nUk84Jcb4HrC5CQ==",
+        },
+    }
+
+
+def test_good_result_package_is_accepted():
+    package = good_package()
+
+    assert v.validate_result_package(package) is package
+
+
+@pytest.mark.parametrize("change", [
+    lambda p: p.update(extra=1),
+    lambda p: p.pop("signature"),
+    lambda p: p["result"].update(extra=1),
+    lambda p: p["result"].update(version="1"),
+    lambda p: p["result"].update(version=True),
+    lambda p: p["result"].update(version=0),
+    lambda p: p["result"].update(ballots_counted=-1),
+    lambda p: p["result"].update(election_id="<script>alert(1)</script>"),
+    lambda p: p["result"].update(divisions=[]),
+    lambda p: p["result"]["divisions"].update({"' OR '1'='1": {"7": 1}}),
+    lambda p: p["result"]["divisions"].update({"Melbourne": {"7; DROP": 1}}),
+    lambda p: p["result"]["divisions"].update({"Melbourne": {"7": "1"}}),
+    lambda p: p["result"]["divisions"].update({"Melbourne": {"7": -5}}),
+    lambda p: p["result"]["divisions"].update({"Melbourne": [1]}),
+    lambda p: p["signature"].update(sig="not base64 !!"),
+    lambda p: p["signature"].update(sig="A" * 5000),
+    lambda p: p["signature"].update(alg="<b>"),
+    lambda p: p["signature"].update(extra=1),
+])
+def test_bad_result_packages_are_rejected(change):
+    package = good_package()
+    change(package)
+
+    with pytest.raises(v.ValidationError):
+        v.validate_result_package(package)
+
+
+@pytest.mark.parametrize("junk", [None, [], "text", 7, {}])
+def test_result_package_must_be_an_object_with_both_parts(junk):
+    with pytest.raises(v.ValidationError):
+        v.validate_result_package(junk)
+
+
+def test_too_many_divisions_are_rejected():
+    package = good_package()
+    package["result"]["divisions"] = {
+        f"Division {chr(65 + i % 26)}{chr(65 + i // 26)}": {"1": 1}
+        for i in range(v.MAX_DIVISIONS + 1)
+    }
+
+    with pytest.raises(v.ValidationError):
+        v.validate_result_package(package)
