@@ -22,6 +22,7 @@ ENVELOPE_ALGORITHM_PATTERN = re.compile(r"[a-z0-9+._-]{1,64}", re.ASCII)
 ENVELOPE_KID_PATTERN = re.compile(r"[A-Za-z0-9:._-]{1,128}", re.ASCII)
 
 MAX_ENVELOPE_FIELD_LENGTH = 16384
+TRACKING_CODE_PATTERN = re.compile(r"sha256:[0-9a-f]{64}", re.ASCII)
 ACCOUNT_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,127}", re.ASCII)
 STAFF_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", re.ASCII)
 TOTP_PATTERN = re.compile(r"[0-9]{6}", re.ASCII)
@@ -359,3 +360,19 @@ def validate_staff_login_request(data):
     _check_password(data["password"])
 
     return data
+
+
+def validate_tracking_code_request(data):
+    """Body of the "check my ballot" lookup: only a tracking code."""
+
+    require_exact_fields(data, {"tracking_code"})
+
+    run_chain(
+        data["tracking_code"],
+        check_text(
+            "tracking_code", min_len=71, max_len=71,
+            pattern=TRACKING_CODE_PATTERN,
+        ),
+    )
+
+    return data["tracking_code"]
