@@ -10,6 +10,7 @@ Routes (internal network only, never on the public edge):
                   results receiver when EVP_RESULTS_URL is set
 - GET  /bulletin  the last published bulletin
 - GET  /verify   the verification web page (no data in it)
+- POST /bulletin/lookup  is this tracking code on the last bulletin?
 - GET  /bulletin/checks  the same bulletin checked again (signature,
                   commitment, recount) with the totals, for the
                   verification page
@@ -56,6 +57,7 @@ from verification.bulletin import all_passed, build_bulletin, verify_bulletin
 from verification.export import ExportFailed, send_results
 from verification.headers import register_security_headers
 from verification.tally import TallyRefused
+from verification.validation import ValidationError, validate_tracking_code_request
 from verification.verify_page import create_verify_blueprint
 
 
@@ -229,6 +231,42 @@ def create_app(environ=None, *, crypto=None):
             checks=[{"name": name, "passed": ok} for name, ok in checks],
             all_passed=all_passed(checks),
         )
+
+    @app.post("/bulletin/lookup")
+    def bulletin_lookup():
+        if not allowed():
+            return jsonify(error="Not allowed"), 401
+
+        if not request.is_json:
+            return jsonify(error="JSON request required"), 415
+
+        try:
+            code = validate_tracking_code_request(
+                request.get_json(silent=True)
+            )
+        except ValidationError:
+            return jsonify(error="Invalid request"), 400
+
+        package = state["bulletin"]
+
+        if package is None:
+            return jsonify(error="Nothing published yet"), 404
+
+        body = package["bulletin"]
+
+        for entry in body["divisions"]:
+            hashes = entry["record_hashes"]
+
+            if code in hashes:
+                return jsonify(
+                    included=True,
+                    division=entry["division"],
+                    position=hashes.index(code) + 1,
+                    ballots_in_division=len(hashes),
+                    version=body["version"],
+                )
+
+        return jsonify(included=False, version=body["version"])
 
     app.register_blueprint(health_blueprint)
     app.register_blueprint(create_verify_blueprint())
