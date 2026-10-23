@@ -297,3 +297,71 @@ def test_good_addresses_are_accepted(address):
 def test_bad_address_updates_are_rejected(body):
     with pytest.raises(v.ValidationError):
         v.validate_address_update(body)
+
+
+# Login bodies
+
+def good_login():
+    return {"account_id": "voter-001", "password": "SyntheticPassword!",
+            "totp_code": "123456"}
+
+
+def test_good_login_bodies_are_accepted():
+    login = good_login()
+
+    assert v.validate_login_request(login) is login
+    assert v.validate_login_request(
+        {**login, "account_id": "  voter-001  ", "password": "p" * 1024}
+    )
+    staff = {"staff_id": "officer-jane-citizen", "password": "x"}
+    assert v.validate_staff_login_request(staff) is staff
+
+
+@pytest.mark.parametrize("change", [
+    {"extra": "1"},
+    {"account_id": ""},
+    {"account_id": "   "},
+    {"account_id": 7},
+    {"account_id": "a" * 129},
+    {"account_id": "' OR '1'='1"},
+    {"account_id": "<script>alert(1)</script>"},
+    {"account_id": "voter\n001"},
+    {"account_id": "vоter-001"},          # Cyrillic o
+    {"password": ""},
+    {"password": 5},
+    {"password": None},
+    {"password": "p" * 1025},
+    {"totp_code": "12345"},
+    {"totp_code": "1234567"},
+    {"totp_code": "12345a"},
+    {"totp_code": 123456},
+    {"totp_code": "\u0661\u0662\u0663\u0664\u0665\u0666"},   # Arabic digits
+    {"totp_code": "123456\n"},
+])
+def test_bad_login_bodies_are_rejected(change):
+    with pytest.raises(v.ValidationError):
+        v.validate_login_request({**good_login(), **change})
+
+
+def test_login_body_with_a_missing_field_is_rejected():
+    for field in ("account_id", "password", "totp_code"):
+        login = good_login()
+        del login[field]
+
+        with pytest.raises(v.ValidationError):
+            v.validate_login_request(login)
+
+
+@pytest.mark.parametrize("body", [
+    None, [], "x", {}, {"staff_id": "a"}, {"password": "x"},
+    {"staff_id": "a", "password": "x", "role": "admin"},
+    {"staff_id": "", "password": "x"},
+    {"staff_id": "a" * 65, "password": "x"},
+    {"staff_id": "officer jane", "password": "x"},
+    {"staff_id": "' OR 1=1--", "password": "x"},
+    {"staff_id": "officer-jane", "password": ""},
+    {"staff_id": "officer-jane", "password": 12345},
+])
+def test_bad_staff_login_bodies_are_rejected(body):
+    with pytest.raises(v.ValidationError):
+        v.validate_staff_login_request(body)

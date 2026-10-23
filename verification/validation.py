@@ -22,6 +22,10 @@ ENVELOPE_ALGORITHM_PATTERN = re.compile(r"[a-z0-9+._-]{1,64}", re.ASCII)
 ENVELOPE_KID_PATTERN = re.compile(r"[A-Za-z0-9:._-]{1,128}", re.ASCII)
 
 MAX_ENVELOPE_FIELD_LENGTH = 16384
+ACCOUNT_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,127}", re.ASCII)
+STAFF_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", re.ASCII)
+TOTP_PATTERN = re.compile(r"[0-9]{6}", re.ASCII)
+MAX_PASSWORD_LENGTH = 1024
 ADDRESS_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ,.'/#()-]{0,254}", re.ASCII)
 LIMIT_PATTERN = re.compile(r"[0-9]{1,3}", re.ASCII)
 STREAM_PATTERN = re.compile(r"[a-z]{1,32}", re.ASCII)
@@ -310,3 +314,48 @@ def validate_address_update(data):
         value.strip(),
         check_text("address_text", max_len=255, pattern=ADDRESS_PATTERN),
     )
+
+
+def _check_password(value):
+    """Any characters, 1 to 1024 long. Passwords are never shown or stored here."""
+
+    if not isinstance(value, str):
+        raise ValidationError("password", "type")
+
+    if not 1 <= len(value) <= MAX_PASSWORD_LENGTH:
+        raise ValidationError("password", "length")
+
+    return value
+
+
+def validate_login_request(data):
+    """Body of the voter POST /login: account, password and 6-digit code."""
+
+    require_exact_fields(data, {"account_id", "password", "totp_code"})
+
+    run_chain(
+        data["account_id"].strip() if isinstance(data["account_id"], str)
+        else data["account_id"],
+        check_text("account_id", max_len=128, pattern=ACCOUNT_ID_PATTERN),
+    )
+    _check_password(data["password"])
+    run_chain(
+        data["totp_code"],
+        check_text("totp_code", min_len=6, max_len=6, pattern=TOTP_PATTERN),
+    )
+
+    return data
+
+
+def validate_staff_login_request(data):
+    """Body of POST /staff/login: staff id and password."""
+
+    require_exact_fields(data, {"staff_id", "password"})
+
+    run_chain(
+        data["staff_id"],
+        check_text("staff_id", max_len=64, pattern=STAFF_ID_PATTERN),
+    )
+    _check_password(data["password"])
+
+    return data
