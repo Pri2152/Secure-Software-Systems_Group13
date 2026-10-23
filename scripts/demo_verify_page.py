@@ -51,12 +51,15 @@ def main():
 
     with app.app_context():
         db.create_all()
+        sample_code = None
         for division, candidate in BALLOTS:
-            append_ballot(ELECTION, division, "opaque", candidate)
+            code = append_ballot(ELECTION, division, "opaque", candidate)
             db.session.commit()
+            sample_code = sample_code or code
 
     print(f"Open  http://127.0.0.1:{PORT}/verify")
     print(f"Token {TOKEN}")
+    print(f"Sample tracking code (a test ballot) {sample_code}")
     app.run(host="127.0.0.1", port=PORT)
 
 
