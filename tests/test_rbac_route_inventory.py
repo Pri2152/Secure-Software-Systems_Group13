@@ -43,6 +43,10 @@ PUBLIC_ENDPOINTS = frozenset({
     # session, so ballots stay unlinkable to voters (SR-08);
     # see docs/WORKSTREAM_C_INTEGRATION.md.
     "voting.ballots",
+    # The sign-in page and its CSS and JavaScript: no data, no
+    # state change. The page uses the existing /login (SR-01).
+    "signin.page",
+    "signin.static",
 })
 
 
