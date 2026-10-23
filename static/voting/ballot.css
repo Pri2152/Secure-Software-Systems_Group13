@@ -1,16 +1,41 @@
-:root { color-scheme: light; font-family: system-ui, sans-serif; color: #172435; background: #f3f6f9; }
-body { margin: 0; padding: 3rem 1rem; }
-main { max-width: 40rem; margin: auto; padding: 2rem; background: white; border-radius: .75rem; }
-h1 { margin-top: .5rem; }
-p { line-height: 1.6; }
-.eyebrow { color: #465e76; font-size: .85rem; }
-fieldset { padding: 1rem; border: 1px solid #c6d0dc; border-radius: .4rem; }
-legend { font-weight: 600; }
-.candidate { display: flex; align-items: center; gap: 1rem; padding: 1rem .5rem; cursor: pointer; }
-.party { display: block; margin-top: .25rem; color: #465e76; }
-input { accent-color: #174f85; width: 1.2rem; height: 1.2rem; }
-button { padding: .85rem 1.25rem; border: 0; border-radius: .35rem; background: #174f85; color: white; font: inherit; cursor: pointer; }
+:root {
+  color-scheme: light dark;
+  --bg: #f3f6f9; --card: #ffffff; --text: #172435; --muted: #465e76;
+  --line: #c6d0dc; --accent: #174f85; --accent-text: #ffffff; --tint: #e8f0fa;
+  --bad: #8c2424; --ok: #1d6b3a; --focus: #db9d24;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12182a; --card: #1b2338; --text: #edf0f7; --muted: #a5afc4;
+    --line: #2f3a55; --accent: #7da6ee; --accent-text: #0f1626; --tint: #232f4d;
+    --bad: #ff8c90; --ok: #7fd49a; --focus: #f2c14e;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 3rem 1rem; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 34rem; margin: auto; padding: 2rem; background: var(--card); border: 1px solid var(--line); border-radius: .9rem; }
+h1 { margin: .25rem 0 .5rem; font-size: 1.75rem; }
+p { margin: 0 0 .75rem; }
+.eyebrow { color: var(--muted); font-size: .8rem; letter-spacing: .04em; }
+.hint { color: var(--muted); }
+.meta { display: flex; flex-wrap: wrap; gap: .5rem; }
+.meta span { padding: .15rem .65rem; border-radius: 999px; background: var(--tint); font-size: .85rem; font-weight: 600; }
+fieldset { margin: 1rem 0 0; padding: 0; border: 0; display: grid; gap: .6rem; }
+legend { margin-bottom: .5rem; padding: 0; font-weight: 600; }
+.candidate { display: flex; align-items: center; gap: .9rem; padding: .85rem 1rem; border: 2px solid var(--line); border-radius: .6rem; cursor: pointer; }
+.candidate:hover { border-color: var(--accent); }
+.candidate:has(input:checked) { border-color: var(--accent); background: var(--tint); }
+.candidate input { width: 1.2rem; height: 1.2rem; accent-color: var(--accent); }
+.avatar { display: inline-grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: 50%; background: var(--accent); color: var(--accent-text); font-weight: 700; }
+.who { display: grid; }
+.party { color: var(--muted); font-size: .9rem; }
+button { width: 100%; margin-top: 1rem; padding: .9rem 1.25rem; border: 1px solid var(--accent); border-radius: .5rem; background: var(--accent); color: var(--accent-text); font: inherit; font-weight: 600; cursor: pointer; }
 button:disabled { opacity: .6; cursor: wait; }
-:focus-visible { outline: 3px solid #db9d24; outline-offset: 3px; }
-#voting-error { color: #8c2424; }
-@media (max-width: 30rem) { body { padding: 1rem .5rem; } main { padding: 1rem; } }
+:focus-visible, .candidate:has(input:focus-visible) { outline: 3px solid var(--focus); outline-offset: 3px; }
+#voting-error { min-height: 1.5rem; margin: .75rem 0 0; color: var(--bad); }
+.secure { margin: 1.25rem 0 0; color: var(--muted); font-size: .8rem; text-align: center; }
+.done-title { color: var(--ok); }
+.done-title::before { content: "\2713"; display: inline-grid; place-items: center; width: 2.5rem; height: 2.5rem; margin-right: .6rem; border-radius: 50%; background: var(--ok); color: var(--card); font-size: 1.4rem; }
+.receipt { padding: .75rem 1rem; border: 1px dashed var(--line); border-radius: .5rem; background: var(--bg); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .85rem; overflow-wrap: anywhere; }
+.tracking { border-color: var(--accent); }
+@media (max-width: 30rem) { body { padding: 1rem .5rem; } main { padding: 1.25rem; } }
