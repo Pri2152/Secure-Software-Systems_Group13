@@ -380,3 +380,34 @@ def test_non_json_update_rejected(client):
     )
 
     assert response.status_code == 415
+
+
+# SR-15: attack text in an address is refused and never echoed back
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "<script>alert(1)</script>",
+        "1 Main St'; DROP TABLE address_records;--",
+        "{{7*7}} Main St",
+        "1 Main St\n2 Other St",
+    ],
+)
+def test_attack_text_in_an_address_is_refused(client, attack):
+    login_as(client, "voter-001")
+
+    response = patch_address(client, 201, {"address_text": attack})
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Invalid address"}
+    assert b"script" not in response.data
+
+    read_back = client.get("/records/addresses/201", base_url=HTTPS_URL)
+    assert read_back.get_json()["address_text"] == "Original Address One"
+
+
+def test_record_routes_use_the_central_validator():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parent.parent / "record_routes.py").read_text()
+
+    assert "validate_address_update" in source

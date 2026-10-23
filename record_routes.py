@@ -5,13 +5,15 @@ SR-05: Protected voter record HTTP endpoints.
 Security controls:
 - Authentication required
 - Server-side record ownership checks
-- Only authorised address updates
+- Only authorised address updates, checked by the central SR-15
+  validator (verification/validation.py)
 - No voter-controlled ownership changes
 - CSRF protection supplied by Flask application
 """
 
 from flask import Blueprint, jsonify, request, session
 
+from verification.validation import ValidationError, validate_address_update
 from records import (
     db,
     EnrolmentRecord,
@@ -99,29 +101,16 @@ def create_record_blueprint(require_active_session):
 
         data = request.get_json(silent=True)
 
-        # Explicit allowlist:
-        # No changes to record ID or owner ID.
-        if (
-            not isinstance(data, dict)
-            or set(data.keys()) != {"address_text"}
-        ):
-            return jsonify(
-                error="Invalid update fields"
-            ), 400
+        # SR-15: the central validator allows only address_text, as
+        # plain text. This also means no changes to record ID or owner ID.
+        try:
+            new_address = validate_address_update(data)
+        except ValidationError as problem:
+            if problem.field is None:
+                return jsonify(
+                    error="Invalid update fields"
+                ), 400
 
-        new_address = data["address_text"]
-
-        if not isinstance(new_address, str):
-            return jsonify(
-                error="Invalid address"
-            ), 400
-
-        new_address = new_address.strip()
-
-        if (
-            not new_address
-            or len(new_address) > 255
-        ):
             return jsonify(
                 error="Invalid address"
             ), 400

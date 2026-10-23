@@ -22,6 +22,7 @@ ENVELOPE_ALGORITHM_PATTERN = re.compile(r"[a-z0-9+._-]{1,64}", re.ASCII)
 ENVELOPE_KID_PATTERN = re.compile(r"[A-Za-z0-9:._-]{1,128}", re.ASCII)
 
 MAX_ENVELOPE_FIELD_LENGTH = 16384
+ADDRESS_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ,.'/#()-]{0,254}", re.ASCII)
 LIMIT_PATTERN = re.compile(r"[0-9]{1,3}", re.ASCII)
 STREAM_PATTERN = re.compile(r"[a-z]{1,32}", re.ASCII)
 AUDIT_DEFAULT_LIMIT = 50
@@ -289,3 +290,23 @@ def validate_audit_query(args, *, streams, allow_limit):
         raise ValidationError("limit", "range")
 
     return stream, limit
+
+
+def validate_address_update(data):
+    """
+    Body of PATCH /records/addresses/<id>: only address_text, as plain
+    text. Letters, digits, spaces and , . ' / # ( ) - only, up to 255
+    characters after trimming. Returns the trimmed address.
+    """
+
+    require_exact_fields(data, {"address_text"})
+
+    value = data["address_text"]
+
+    if not isinstance(value, str):
+        raise ValidationError("address_text", "type")
+
+    return run_chain(
+        value.strip(),
+        check_text("address_text", max_len=255, pattern=ADDRESS_PATTERN),
+    )

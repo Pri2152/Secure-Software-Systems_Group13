@@ -263,3 +263,37 @@ def test_bad_audit_queries_are_rejected(query, allow_limit):
         v.validate_audit_query(
             query, streams=STREAMS, allow_limit=allow_limit
         )
+
+
+# Address update body
+
+@pytest.mark.parametrize("address", [
+    "Updated Test Address",
+    "12/34 Smith St, Carlton VIC 3053",
+    "Unit 5 (rear), 7 O'Brien Rd.",
+    "  Padded Address  ",
+])
+def test_good_addresses_are_accepted(address):
+    result = v.validate_address_update({"address_text": address})
+
+    assert result == address.strip()
+
+
+@pytest.mark.parametrize("body", [
+    None, [], "text", {}, {"address_text": 5}, {"address_text": None},
+    {"address_text": ""}, {"address_text": "   "},
+    {"address_text": "A" * 256},
+    {"address_text": "1 Main St", "owner_id": 9},
+    {"address_text": "1 Main St", "id": 2},
+    {"address_text": "<script>alert(1)</script>"},
+    {"address_text": "1 Main St<img src=x onerror=alert(1)>"},
+    {"address_text": "1 Main St'; DROP TABLE address_records;--"},
+    {"address_text": "{{7*7}} Main St"},
+    {"address_text": "1 Main St\n2 Other St"},
+    {"address_text": "1 Main St\x00"},
+    {"address_text": "1 Main St \u202e"},
+    {"address_text": "1 Мain St"},          # Cyrillic M
+])
+def test_bad_address_updates_are_rejected(body):
+    with pytest.raises(v.ValidationError):
+        v.validate_address_update(body)
