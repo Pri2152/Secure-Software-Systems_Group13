@@ -11,19 +11,40 @@
   <main>
     <p class="eyebrow">Electronic Voting Platform · Academic prototype</p>
     <h1>Sign in to vote</h1>
-    <p>Use your account, your password and the 6-digit code from your authenticator app.</p>
-    <form id="signin-form" autocomplete="off">
-      <label for="account_id">Account</label>
-      <input id="account_id" name="account_id" type="text" required maxlength="64" autocomplete="username">
 
-      <label for="password">Password</label>
-      <input id="password" name="password" type="password" required maxlength="128" autocomplete="current-password">
+    <ol class="steps" aria-label="Sign-in steps">
+      <li id="step-label-1" aria-current="step"><span>1</span> Your account</li>
+      <li id="step-label-2"><span>2</span> Authenticator code</li>
+    </ol>
 
-      <label for="totp_code">6-digit code</label>
-      <input id="totp_code" name="totp_code" type="text" inputmode="numeric" pattern="[0-9]{6}" required maxlength="6" autocomplete="one-time-code">
+    <form id="signin-form" autocomplete="off" novalidate>
+      <section id="step-1" aria-labelledby="step-label-1">
+        <label for="account_id">Account</label>
+        <input id="account_id" name="account_id" type="text" required maxlength="64" autocomplete="username">
+
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" required maxlength="128" autocomplete="current-password">
+
+        <label class="inline">
+          <input id="show-password" type="checkbox"> Show password
+        </label>
+
+        <button type="button" id="next">Continue</button>
+      </section>
+
+      <section id="step-2" aria-labelledby="step-label-2" hidden>
+        <p class="hint">Open your authenticator app and enter the 6-digit code for this account. The code changes every 30 seconds.</p>
+
+        <label for="totp_code">6-digit code</label>
+        <input id="totp_code" name="totp_code" type="text" inputmode="numeric" pattern="[0-9]{6}" required maxlength="6" autocomplete="one-time-code">
+
+        <div class="actions">
+          <button type="button" id="back" class="secondary">Back</button>
+          <button type="submit" id="submit">Sign in</button>
+        </div>
+      </section>
 
       <p id="signin-error" role="alert"></p>
-      <button type="submit">Sign in</button>
     </form>
     <noscript>JavaScript is required to sign in.</noscript>
   </main>
