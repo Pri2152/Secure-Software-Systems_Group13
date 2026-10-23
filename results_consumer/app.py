@@ -1,8 +1,9 @@
 """
 SR-18: receiver for signed election results.
 
-It only accepts a result when the signature is good, the election id
-matches and the version is newer than the last one it accepted.
+It first checks the shape and format of the input (SR-15), then only
+accepts a result when the signature is good, the election id matches
+and the version is newer than the last one it accepted.
 It needs only the public key, never the private key.
 """
 
@@ -13,6 +14,7 @@ from flask import Flask, jsonify, request
 
 from verification.headers import register_security_headers
 from verification.results import ResultRejected, verify_package
+from verification.validation import ValidationError, validate_result_package
 
 
 logger = logging.getLogger("evp.results_consumer")
@@ -41,6 +43,15 @@ def create_app(*, crypto, election_id, state=None):
             return jsonify(error="JSON request required"), 415
 
         package = request.get_json(silent=True)
+
+        try:
+            validate_result_package(package)
+        except ValidationError as problem:
+            # field and reason go to the log only, never the input itself
+            logger.warning(
+                "result_invalid field=%s reason=%s", problem.field, problem.reason
+            )
+            return jsonify(error="Result rejected"), 400
 
         with state.lock:
             try:
