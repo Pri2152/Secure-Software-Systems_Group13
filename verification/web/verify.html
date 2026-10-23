@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Verify the count</title>
+  <link rel="stylesheet" href="/verify/assets/verify.css">
+</head>
+<body>
+  <main class="card">
+    <p class="kicker">Electronic Voting Platform</p>
+    <h1>Verify the count</h1>
+    <p class="lead">
+      Check that the published result was signed, matches the published
+      ballots, and that nothing was changed after the count.
+    </p>
+
+    <form id="token-form" class="row" autocomplete="off">
+      <label for="token">Tally token</label>
+      <input id="token" type="password" minlength="32" required>
+      <div class="buttons">
+        <button type="button" id="publish" class="secondary">Count and publish</button>
+        <button type="submit" id="verify">Verify latest result</button>
+      </div>
+    </form>
+
+    <p id="message" role="status" aria-live="polite" class="message"></p>
+
+    <section id="outcome" hidden>
+      <div id="banner" class="banner"></div>
+
+      <dl class="meta">
+        <div><dt>Election</dt><dd id="election"></dd></div>
+        <div><dt>Version</dt><dd id="version"></dd></div>
+        <div><dt>Ballots counted</dt><dd id="ballots"></dd></div>
+      </dl>
+
+      <h2>Checks</h2>
+      <ul id="checks" class="checks"></ul>
+
+      <h2>Totals by division</h2>
+      <div id="totals"></div>
+
+      <h2>Commitment</h2>
+      <p class="mono" id="commitment"></p>
+    </section>
+  </main>
+  <script src="/verify/assets/verify.js"></script>
+</body>
+</html>

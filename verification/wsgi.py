@@ -9,6 +9,7 @@ Routes (internal network only, never on the public edge):
                   new bulletin; also sends the signed result to the
                   results receiver when EVP_RESULTS_URL is set
 - GET  /bulletin  the last published bulletin
+- GET  /verify   the verification web page (no data in it)
 - GET  /bulletin/checks  the same bulletin checked again (signature,
                   commitment, recount) with the totals, for the
                   verification page
@@ -55,6 +56,7 @@ from verification.bulletin import all_passed, build_bulletin, verify_bulletin
 from verification.export import ExportFailed, send_results
 from verification.headers import register_security_headers
 from verification.tally import TallyRefused
+from verification.verify_page import create_verify_blueprint
 
 
 logger = logging.getLogger("evp.tally")
@@ -229,6 +231,7 @@ def create_app(environ=None, *, crypto=None):
         )
 
     app.register_blueprint(health_blueprint)
+    app.register_blueprint(create_verify_blueprint())
 
     return register_security_headers(app)
 
