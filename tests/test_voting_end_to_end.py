@@ -53,7 +53,7 @@ def test_login_page_credential_and_vote_over_real_http(voting_client, monkeypatc
                          headers=headers, base_url=HTTPS_URL)
     assert result.status_code == 200
     output = result.get_json()
-    assert set(output) == {"status", "confirmation_reference"}
+    assert set(output) == {"status", "confirmation_reference", "tracking_code"}
     reference = output["confirmation_reference"]
     assert output["status"] == "accepted"
     assert caplog.records == []
@@ -67,8 +67,12 @@ def test_login_page_credential_and_vote_over_real_http(voting_client, monkeypatc
         assert not {"source_ip", "timestamp", "candidate_id", "confirmation_reference"} & {
             col.name for col in AnonymousBallot.__table__.columns
         }
+        # SR-11: the record hash is returned on purpose as the tracking code.
+        # It is a public value (it is on the bulletin) and says nothing about
+        # the choice, so only the other record fields must stay out.
+        assert output["tracking_code"] == ballot.record_hash
         for value in (credential, "voter-001", "Candidate Alpha", "Example Party",
-                      ballot.ballot_id, ballot.record_hash, ballot.previous_hash,
+                      ballot.ballot_id, ballot.previous_hash,
                       ballot.encrypted_ballot_json):
             assert value not in result.get_data(as_text=True)
         assert ballot.ballot_id not in str([dict(row) for row in db.session.execute(

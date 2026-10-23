@@ -73,7 +73,7 @@ def test_real_issuance_and_acceptance_clear_session(voting_client):
     assert set(response.get_json()) == {"credential"}
     result = vote(client, response.get_json()["credential"], candidate_id)
     assert result.status_code == 200
-    assert set(result.get_json()) == {"status", "confirmation_reference"}
+    assert set(result.get_json()) == {"status", "confirmation_reference", "tracking_code"}
     assert result.get_json()["status"] == "accepted"
     assert is_confirmation_reference(result.get_json()["confirmation_reference"])
     assert client.get("/session-status", base_url=HTTPS_URL).status_code == 401
