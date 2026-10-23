@@ -275,3 +275,27 @@ def test_with_workstream_e_require_permission(audit_log):
 
     login_staff(client, "auditor")
     assert client.get("/audit/events?stream=identity").status_code == 200
+
+
+# SR-15: the query rules live in the central validator
+
+def test_audit_routes_use_the_central_validator():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parent.parent / "audit" / "routes.py").read_text()
+
+    assert "validate_audit_query" in source
+    assert "isdigit" not in source
+
+
+@pytest.mark.parametrize("path", [
+    "/audit/events?stream=%3Cscript%3Ealert(1)%3C/script%3E",
+    "/audit/events?stream=identity&limit=%D9%A5",
+    "/audit/verify?stream=identity%0A",
+])
+def test_attack_queries_get_a_plain_400_that_never_echoes_input(auditor, path):
+    response = auditor.get(path)
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Invalid request"}
+    assert b"script" not in response.data

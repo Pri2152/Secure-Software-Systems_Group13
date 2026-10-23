@@ -223,3 +223,43 @@ def test_too_many_divisions_are_rejected():
 
     with pytest.raises(v.ValidationError):
         v.validate_result_package(package)
+
+
+# Audit read query
+
+STREAMS = ("identity", "ballot", "admin")
+
+
+def test_good_audit_queries_are_accepted():
+    assert v.validate_audit_query(
+        {"stream": "identity"}, streams=STREAMS, allow_limit=True
+    ) == ("identity", 50)
+    assert v.validate_audit_query(
+        {"stream": "ballot", "limit": "200"}, streams=STREAMS, allow_limit=True
+    ) == ("ballot", 200)
+    assert v.validate_audit_query(
+        {"stream": "admin"}, streams=STREAMS, allow_limit=False
+    ) == ("admin", 50)
+
+
+@pytest.mark.parametrize("query,allow_limit", [
+    ({}, True),
+    ({"limit": "5"}, True),
+    ({"stream": "secret"}, True),
+    ({"stream": "identity", "extra": "1"}, True),
+    ({"stream": "identity", "limit": "0"}, True),
+    ({"stream": "identity", "limit": "201"}, True),
+    ({"stream": "identity", "limit": "-1"}, True),
+    ({"stream": "identity", "limit": "abc"}, True),
+    ({"stream": "identity", "limit": "1000"}, True),
+    ({"stream": "identity", "limit": "\u0665"}, True),   # Arabic digit
+    ({"stream": "identity", "limit": "5"}, False),
+    ({"stream": "identity\n"}, True),
+    ({"stream": "' OR '1'='1"}, True),
+    ({"stream": "<script>"}, True),
+])
+def test_bad_audit_queries_are_rejected(query, allow_limit):
+    with pytest.raises(v.ValidationError):
+        v.validate_audit_query(
+            query, streams=STREAMS, allow_limit=allow_limit
+        )
