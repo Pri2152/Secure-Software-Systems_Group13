@@ -22,6 +22,11 @@ ENVELOPE_ALGORITHM_PATTERN = re.compile(r"[a-z0-9+._-]{1,64}", re.ASCII)
 ENVELOPE_KID_PATTERN = re.compile(r"[A-Za-z0-9:._-]{1,128}", re.ASCII)
 
 MAX_ENVELOPE_FIELD_LENGTH = 16384
+LIMIT_PATTERN = re.compile(r"[0-9]{1,3}", re.ASCII)
+STREAM_PATTERN = re.compile(r"[a-z]{1,32}", re.ASCII)
+AUDIT_DEFAULT_LIMIT = 50
+AUDIT_MAX_LIMIT = 200
+
 CANDIDATE_KEY_PATTERN = re.compile(r"[0-9]{1,10}", re.ASCII)
 
 MAX_DIVISIONS = 200
@@ -253,3 +258,34 @@ def validate_result_package(data):
     check_base64("sig", max_len=1024)(signature["sig"])
 
     return data
+
+
+def validate_audit_query(args, *, streams, allow_limit):
+    """
+    Query string of the audit read routes, as a plain dict of strings.
+    Returns (stream, limit). The stream is needed and must be one of
+    streams. The limit is only allowed when allow_limit is true.
+    """
+
+    allowed = {"stream", "limit"} if allow_limit else {"stream"}
+
+    require_exact_fields(args, allowed, required={"stream"})
+
+    stream = run_chain(
+        args["stream"], check_text("stream", pattern=STREAM_PATTERN)
+    )
+
+    if stream not in streams:
+        raise ValidationError("stream", "unknown")
+
+    if "limit" not in args:
+        return stream, AUDIT_DEFAULT_LIMIT
+
+    limit = int(run_chain(
+        args["limit"], check_text("limit", pattern=LIMIT_PATTERN)
+    ))
+
+    if not 1 <= limit <= AUDIT_MAX_LIMIT:
+        raise ValidationError("limit", "range")
+
+    return stream, limit
