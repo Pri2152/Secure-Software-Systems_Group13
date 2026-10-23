@@ -173,3 +173,78 @@ def test_checks_route_reports_totals_and_passing_checks(tally):
     assert data["version"] == 1
     assert all(item["passed"] for item in data["checks"])
     assert "record_hashes" not in data and "bulletin" not in data
+
+
+def test_lookup_needs_the_token(tally):
+    app, _ = tally
+
+    response = app.test_client().post(
+        "/bulletin/lookup", json={"tracking_code": "sha256:" + "0" * 64}
+    )
+
+    assert response.status_code == 401
+
+
+def test_lookup_finds_a_published_record_and_misses_an_unknown_one(tally):
+    app, _ = tally
+    client = app.test_client()
+    client.post("/publish", headers=HEADERS)
+
+    with app.app_context():
+        from ballot_models import AnonymousBallot
+        mine = AnonymousBallot.query.filter_by(
+            electoral_division="Kooyong"
+        ).one().record_hash
+
+    found = client.post(
+        "/bulletin/lookup", json={"tracking_code": mine}, headers=HEADERS
+    ).get_json()
+    missing = client.post(
+        "/bulletin/lookup", json={"tracking_code": "sha256:" + "0" * 64},
+        headers=HEADERS,
+    ).get_json()
+
+    assert found == {
+        "included": True, "division": "Kooyong", "position": 1,
+        "ballots_in_division": 1, "version": 1,
+    }
+    assert missing == {"included": False, "version": 1}
+
+
+def test_lookup_says_nothing_published_yet(tally):
+    app, _ = tally
+
+    response = app.test_client().post(
+        "/bulletin/lookup", json={"tracking_code": "sha256:" + "0" * 64},
+        headers=HEADERS,
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("body", [
+    [], "x", {}, {"tracking_code": 5},
+    {"tracking_code": "' OR '1'='1"},
+    {"tracking_code": "<script>alert(1)</script>"},
+    {"tracking_code": "sha256:" + "G" * 64},
+    {"tracking_code": "sha256:" + "0" * 63},
+    {"tracking_code": "sha256:" + "0" * 64, "extra": 1},
+])
+def test_lookup_refuses_bad_bodies_without_echoing_them(tally, body):
+    app, _ = tally
+
+    response = app.test_client().post(
+        "/bulletin/lookup", json=body, headers=HEADERS
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Invalid request"}
+    assert b"script" not in response.data
+
+
+def test_lookup_needs_a_json_body(tally):
+    app, _ = tally
+
+    response = app.test_client().post("/bulletin/lookup", headers=HEADERS)
+
+    assert response.status_code == 415

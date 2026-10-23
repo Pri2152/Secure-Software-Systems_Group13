@@ -9,7 +9,7 @@ from ballot_credentials import (
 )
 from records import db
 from ballot_service import EligibilityError, get_ballot_candidates, get_voting_eligibility
-from ballot_protection import parse_json
+from ballot_protection import HASH_PATTERN, parse_json
 
 
 WEB_BALLOT_PAYLOAD = '{"format":"single-choice-web-v1"}'
@@ -102,9 +102,11 @@ def create_voting_blueprint(require_active_session):
             or type(data["candidate_id"]) is not int or data["candidate_id"] <= 0
         ):
             return jsonify(error="Invalid request"), 400
+        recorded = []
         try:
             reference = accept_ballot_with_credential(
-                data["credential"], data["candidate_id"], WEB_BALLOT_PAYLOAD
+                data["credential"], data["candidate_id"], WEB_BALLOT_PAYLOAD,
+                on_recorded=recorded.append,
             )
         except CredentialError:
             return jsonify(error="Vote could not be accepted"), 409
@@ -112,6 +114,11 @@ def create_voting_blueprint(require_active_session):
             db.session.rollback()
             return jsonify(error="Vote could not be accepted"), 503
         session.clear()
-        return jsonify(status="accepted", confirmation_reference=reference), 200
+        reply = {"status": "accepted", "confirmation_reference": reference}
+        # SR-11: the public hash of the new record is the voter's tracking
+        # code. It is not linked to the choice, so it is no receipt (SR-09).
+        if recorded and isinstance(recorded[0], str) and HASH_PATTERN.fullmatch(recorded[0]):
+            reply["tracking_code"] = recorded[0]
+        return jsonify(reply), 200
 
     return bp

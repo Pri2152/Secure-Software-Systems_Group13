@@ -77,12 +77,16 @@ def issue_ballot_credential(voter_id, election_id, *, clock=None):
 
 
 def accept_ballot_with_credential(
-    credential, candidate_id, encrypted_ballot_json, *, clock=None
+    credential, candidate_id, encrypted_ballot_json, *, clock=None,
+    on_recorded=None,
 ):
     """
     Accept without caller-supplied identity; commit all three changes together.
 
     Returns only an ephemeral confirmation after commit; never a ballot ID.
+    If on_recorded is given it is called once, after the commit, with the
+    record hash (SR-11 tracking code). The hash is a public value on the
+    bulletin and says nothing about the choice or the voter.
     Owns the current session transaction.
     """
     try:
@@ -110,11 +114,13 @@ def accept_ballot_with_credential(
         if consumed != 1:
             raise CredentialError("Credential authorisation failed")
 
-        store_anonymous_ballot(
+        record_hash = store_anonymous_ballot(
             record.election_id, record.electoral_division, encrypted_ballot_json, candidate_id
         )
         confirmation = generate_confirmation_reference()
         db.session.commit()
+        if on_recorded is not None:
+            on_recorded(record_hash)
         return confirmation
     except (
         EligibilityError, CredentialError, CryptoError, SQLAlchemyError,

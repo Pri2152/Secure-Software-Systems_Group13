@@ -365,3 +365,24 @@ def test_login_body_with_a_missing_field_is_rejected():
 def test_bad_staff_login_bodies_are_rejected(body):
     with pytest.raises(v.ValidationError):
         v.validate_staff_login_request(body)
+
+
+# Tracking code lookup
+
+def test_good_tracking_code_is_accepted():
+    code = "sha256:" + "ab12" * 16
+
+    assert v.validate_tracking_code_request({"tracking_code": code}) == code
+
+
+@pytest.mark.parametrize("body", [
+    None, [], {}, {"tracking_code": None}, {"tracking_code": 7},
+    {"tracking_code": "sha256:" + "A" * 64},          # upper case
+    {"tracking_code": "sha256:" + "a" * 65},
+    {"tracking_code": "md5:" + "a" * 64},
+    {"tracking_code": "sha256:" + "a" * 63 + "\n"},
+    {"tracking_code": "sha256:" + "a" * 64, "x": 1},
+])
+def test_bad_tracking_code_requests_are_rejected(body):
+    with pytest.raises(v.ValidationError):
+        v.validate_tracking_code_request(body)

@@ -60,7 +60,10 @@ def compute_record_hash(record):
 
 
 def append_ballot(election_id, electoral_division, payload, candidate_id):
-    """Stage an encrypted append and checkpoint; caller owns commit/rollback."""
+    """Stage an encrypted append and checkpoint; caller owns commit/rollback.
+
+    Returns the record hash, the public identifier of the new record.
+    """
     with db.session.no_autoflush:
         state = db.session.execute(select(BallotChainState).where(
             BallotChainState.election_id == election_id,
@@ -102,3 +105,4 @@ def append_ballot(election_id, electoral_division, payload, candidate_id):
         if claimed != 1:
             raise BallotChainError("Ballot chain unavailable")
         db.session.add(record)
+    return record.record_hash
