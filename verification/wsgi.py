@@ -9,6 +9,9 @@ Routes (internal network only, never on the public edge):
                   new bulletin; also sends the signed result to the
                   results receiver when EVP_RESULTS_URL is set
 - GET  /bulletin  the last published bulletin
+- GET  /bulletin/checks  the same bulletin checked again (signature,
+                  commitment, recount) with the totals, for the
+                  verification page
 
 Security controls:
 - Both /publish and /bulletin need a bearer token read from a secret
@@ -48,7 +51,7 @@ import audit
 import crypto_agility
 from platform_security.health import health_blueprint
 from records import db
-from verification.bulletin import build_bulletin
+from verification.bulletin import all_passed, build_bulletin, verify_bulletin
 from verification.export import ExportFailed, send_results
 from verification.headers import register_security_headers
 from verification.tally import TallyRefused
@@ -200,6 +203,30 @@ def create_app(environ=None, *, crypto=None):
             return jsonify(error="Nothing published yet"), 404
 
         return jsonify(state["bulletin"])
+
+    @app.get("/bulletin/checks")
+    def bulletin_checks():
+        if not allowed():
+            return jsonify(error="Not allowed"), 401
+
+        package = state["bulletin"]
+
+        if package is None:
+            return jsonify(error="Nothing published yet"), 404
+
+        checks = verify_bulletin(crypto, package)
+        body = package["bulletin"]
+        result = package["result"]["result"]
+
+        return jsonify(
+            election_id=body["election_id"],
+            version=body["version"],
+            commitment=body["commitment"],
+            ballots_counted=result["ballots_counted"],
+            divisions=result["divisions"],
+            checks=[{"name": name, "passed": ok} for name, ok in checks],
+            all_passed=all_passed(checks),
+        )
 
     app.register_blueprint(health_blueprint)
 
