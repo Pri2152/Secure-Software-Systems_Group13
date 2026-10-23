@@ -240,3 +240,27 @@ def test_outdated_password_hash_is_upgraded(env):
         assert upgraded.password_hash.startswith(
             "$argon2id$v=19$m=65536,t=3,p=4$"
         )
+
+
+# SR-15: the central validator checks the staff login body
+@pytest.mark.parametrize("staff_id", [
+    "' OR 1=1--",
+    "<script>alert(1)</script>",
+    "officer jane",
+])
+def test_attack_text_as_staff_id_gets_a_plain_400(env, staff_id):
+    response = login(env, staff_id=staff_id)
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Invalid request"}
+    assert b"script" not in response.data
+
+
+def test_staff_login_route_uses_the_central_validator():
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parent.parent / "admin" / "routes.py"
+    ).read_text()
+
+    assert "validate_staff_login_request" in source

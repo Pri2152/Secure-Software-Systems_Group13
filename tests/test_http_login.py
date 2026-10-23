@@ -268,3 +268,38 @@ def test_untrusted_forwarded_header_ignored(environment):
     )
 
     assert response.status_code == 429
+
+
+# SR-15: the central validator checks the login body
+
+@pytest.mark.parametrize("account", [
+    "' OR '1'='1",
+    "<script>alert(1)</script>",
+    "voter-001; DROP TABLE voters",
+    "a" * 129,
+])
+def test_attack_text_as_account_gets_a_plain_400(environment, account):
+    client, clock = environment
+
+    response = login_request(client, clock, account=account)
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Invalid request"}
+    assert b"script" not in response.data
+
+
+@pytest.mark.parametrize("code", ["12345", "1234567", "abcdef", "12345\n"])
+def test_bad_code_format_gets_a_plain_400(environment, code):
+    client, clock = environment
+
+    response = login_request(client, clock, code=code)
+
+    assert response.status_code == 400
+
+
+def test_login_route_uses_the_central_validator():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parent.parent / "app.py").read_text()
+
+    assert "validate_login_request" in source
