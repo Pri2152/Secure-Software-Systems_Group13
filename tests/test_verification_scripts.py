@@ -67,3 +67,16 @@ def test_demo_script_shows_pass_then_fail(capsys):
 
     assert "FAIL" not in honest.split("Check of the honest bulletin:")[1]
     assert "FAIL" in changed
+
+
+def test_verify_page_demo_script_imports_without_running():
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "scripts" / "demo_verify_page.py"
+    spec = importlib.util.spec_from_file_location("demo_verify_page", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.PORT == 5055
+    assert len(module.TOKEN) >= 32
